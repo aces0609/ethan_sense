@@ -74,6 +74,7 @@ class FilingRef(BaseModel):
     url: str
     index_url: str
     description: str | None = None
+    items: str | None = None  # 8-K item codes, e.g. "2.02,9.01"
 
 
 class SourceRecord(BaseModel):
@@ -122,6 +123,9 @@ class Brief(BaseModel):
     required_exhibit: str
     stop_condition: str
     common_failure: str | None = None
+    aliases: list[str] = Field(default_factory=list)  # entity aliases appended to query batches
+    trade_press: list[str] = Field(default_factory=list)  # sector trade-press domains to prefer
+    planner: str = "template"  # "template" or the model that expanded the brief
 
 
 class SectionDraft(BaseModel):
@@ -135,6 +139,7 @@ class SectionDraft(BaseModel):
     exhibit_present: bool = False
     critic_notes: list[str] = Field(default_factory=list)
     iterations: int = 0
+    budget: dict[str, Any] = Field(default_factory=dict)  # searches/scrapes/credits used vs cap
 
 
 class CriticScore(BaseModel):
@@ -191,6 +196,7 @@ class ResearcherState(TypedDict, total=False):
     brief: dict[str, Any]
     critic_notes: list[str]
     iteration: int
+    budget: dict[str, Any]
     plan_items: list[dict[str, Any]]
     tool_results: dict[str, Any]
     draft: dict[str, Any]

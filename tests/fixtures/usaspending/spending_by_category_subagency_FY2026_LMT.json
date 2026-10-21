@@ -1,0 +1,138 @@
+{
+ "category": "awarding_subagency",
+ "spending_level": "transactions",
+ "limit": 10,
+ "page_metadata": {
+  "page": 1,
+  "next": 2,
+  "previous": null,
+  "hasNext": true,
+  "hasPrevious": false
+ },
+ "results": [
+  {
+   "id": 1188,
+   "code": "USA",
+   "name": "Department of the Army",
+   "agency_id": 126,
+   "agency_abbreviation": "DOD",
+   "agency_name": "Department of Defense",
+   "agency_slug": "department-of-defense",
+   "subagency_slug": "department-of-the-army",
+   "amount": 13854559035.55,
+   "total_outlays": null
+  },
+  {
+   "id": 1174,
+   "code": "USN",
+   "name": "Department of the Navy",
+   "agency_id": 126,
+   "agency_abbreviation": "DOD",
+   "agency_name": "Department of Defense",
+   "agency_slug": "department-of-defense",
+   "subagency_slug": "department-of-the-navy",
+   "amount": 13478798790.31,
+   "total_outlays": null
+  },
+  {
+   "id": 1196,
+   "code": "USAF",
+   "name": "Department of the Air Force",
+   "agency_id": 126,
+   "agency_abbreviation": "DOD",
+   "agency_name": "Department of Defense",
+   "agency_slug": "department-of-defense",
+   "subagency_slug": "department-of-the-air-force",
+   "amount": 3735250853.36,
+   "total_outlays": null
+  },
+  {
+   "id": 1234,
+   "code": "MDA",
+   "name": "Missile Defense Agency",
+   "agency_id": 126,
+   "agency_abbreviation": "DOD",
+   "agency_name": "Department of Defense",
+   "agency_slug": "department-of-defense",
+   "subagency_slug": "missile-defense-agency",
+   "amount": 2673698251.65,
+   "total_outlays": null
+  },
+  {
+   "id": 862,
+   "code": "NASA",
+   "name": "National Aeronautics and Space Administration",
+   "agency_id": 72,
+   "agency_abbreviation": "NASA",
+   "agency_name": "National Aeronautics and Space Administration",
+   "agency_slug": "national-aeronautics-and-space-administration",
+   "subagency_slug": "national-aeronautics-and-space-administration",
+   "amount": 405316520.71,
+   "total_outlays": null
+  },
+  {
+   "id": 1219,
+   "code": "DLA",
+   "name": "Defense Logistics Agency",
+   "agency_id": 126,
+   "agency_abbreviation": "DOD",
+   "agency_name": "Department of Defense",
+   "agency_slug": "department-of-defense",
+   "subagency_slug": "defense-logistics-agency",
+   "amount": 12099707.09,
+   "total_outlays": null
+  },
+  {
+   "id": 772,
+   "code": "USCG",
+   "name": "U.S. Coast Guard",
+   "agency_id": 63,
+   "agency_abbreviation": "DHS",
+   "agency_name": "Department of Homeland Security",
+   "agency_slug": "department-of-homeland-security",
+   "subagency_slug": "us-coast-guard",
+   "amount": 412813.0,
+   "total_outlays": null
+  },
+  {
+   "id": 195,
+   "code": "NOAA",
+   "name": "National Oceanic and Atmospheric Administration",
+   "agency_id": 15,
+   "agency_abbreviation": "DOC",
+   "agency_name": "Department of Commerce",
+   "agency_slug": "department-of-commerce",
+   "subagency_slug": "national-oceanic-and-atmospheric-administration",
+   "amount": 73614.0,
+   "total_outlays": null
+  },
+  {
+   "id": 1216,
+   "code": "DARPA",
+   "name": "Defense Advanced Research Projects Agency",
+   "agency_id": 126,
+   "agency_abbreviation": "DOD",
+   "agency_name": "Department of Defense",
+   "agency_slug": "department-of-defense",
+   "subagency_slug": "defense-advanced-research-projects-agency",
+   "amount": -438039.23,
+   "total_outlays": null
+  },
+  {
+   "id": 930,
+   "code": "DOE",
+   "name": "Department of Energy",
+   "agency_id": 78,
+   "agency_abbreviation": "DOE",
+   "agency_name": "Department of Energy",
+   "agency_slug": "department-of-energy",
+   "subagency_slug": "department-of-energy",
+   "amount": -2735852.54,
+   "total_outlays": null
+  }
+ ],
+ "messages": [
+  "For searches, time period start and end dates are currently limited to an earliest date of 2007-10-01.  For data going back to 2000-10-01, use either the Custom Award Download feature on the website or one of our download or bulk_download API endpoints as listed on https://api.usaspending.gov/docs/endpoints. ",
+  "'subawards' will be deprecated in the future. Set \u2018spending_level\u2019 to \u2018subawards\u2019 instead. See documentation for more information. "
+ ]
+}

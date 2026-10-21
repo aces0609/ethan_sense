@@ -58,10 +58,20 @@ def run_all(
         "page_budget": check_page_budget(sections_md),
     }
     notes: dict[int, list[str]] = {}
+    undisclosed = []
     for conf in checks["numeric"]["conflicts"]:
+        later_md = sections_md.get(int(conf["later_section"]), "")
+        label = conf["metric"].replace("_", " ")
+        if "> Conflict:" in later_md and label in later_md:
+            conf["disclosed"] = True
+            continue
+        conf["disclosed"] = False
+        undisclosed.append(conf)
         notes.setdefault(conf["later_section"], []).append(
             f"numeric conflict on {conf['metric']} {conf['period']}: add a '> Conflict:' line citing both sources"
         )
+    checks["numeric"]["undisclosed"] = len(undisclosed)
+    checks["numeric"]["ok"] = not undisclosed
     for f in checks["tier"]["flagged"]:
         notes.setdefault(f["section"], []).append(
             f"{f['metric']} {f['period']} cites only tier-{f['tiers']} sources; cite companyfacts"

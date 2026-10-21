@@ -22,8 +22,26 @@ from typing import Any
 from primer.config import tier_for_url
 from primer.state import SourceRecord
 
+_REGISTRY: dict[str, EvidenceStore] = {}
+_REG_LOCK = threading.Lock()
+
 
 class EvidenceStore:
+    """Use `EvidenceStore.for_run(run_dir)` inside the graph: thirteen researcher threads share
+    one instance per run, so source ids are assigned under one lock and never collide."""
+
+    @classmethod
+    def for_run(cls, run_dir: str | Path, as_of: date | None = None) -> EvidenceStore:
+        key = str(Path(run_dir).resolve())
+        with _REG_LOCK:
+            store = _REGISTRY.get(key)
+            if store is None:
+                store = cls(run_dir, as_of=as_of)
+                _REGISTRY[key] = store
+            elif as_of and store.as_of != as_of:
+                store.as_of = as_of
+            return store
+
     def __init__(self, run_dir: str | Path, as_of: date | None = None) -> None:
         self.run_dir = Path(run_dir)
         self.dir = self.run_dir / "evidence"
@@ -110,7 +128,21 @@ class EvidenceStore:
         return (self.run_dir / rec.evidence_path).read_text(encoding="utf-8")
 
     def records(self) -> list[SourceRecord]:
-        return list(self._records.values())
+        with self._lock:
+            return list(self._records.values())
+
+    def ids(self) -> list[str]:
+        with self._lock:
+            return list(self._records.keys())
+
+    def search_text(self, needle: str, source_ids: list[str] | None = None) -> list[str]:
+        """Source ids whose evidence text contains `needle` (case-insensitive)."""
+        needle = needle.lower()
+        out = []
+        for sid in source_ids or self.ids():
+            if self.has(sid) and needle in self.text(sid).lower():
+                out.append(sid)
+        return out
 
     def find(self, **filters: Any) -> list[SourceRecord]:
         out = []

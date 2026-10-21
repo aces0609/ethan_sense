@@ -17,6 +17,7 @@ from primer.clients.edgar import AnnualFinancials, EdgarClient
 from primer.evidence.store import EvidenceStore
 from primer.llm import invoke_text
 from primer.runlog import RunLog
+from primer.sections.common import ToolContext
 from primer.sections.exhibits import financial_tables
 from primer.sections.style import HOUSE_STYLE, fmt_money, fmt_pct
 from primer.state import Brief, Claim, Entity, SectionDraft
@@ -24,7 +25,8 @@ from primer.state import Brief, Claim, Entity, SectionDraft
 GATE_METRICS = ("revenue", "net_income", "operating_cash_flow", "capex")
 
 
-def plan(brief: Brief, entity: Entity, as_of: date) -> list[dict[str, Any]]:
+def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
+    entity, as_of = ctx.entity, ctx.as_of
     return [
         {
             "tool": "edgar.annual_financials",
@@ -38,26 +40,23 @@ def plan(brief: Brief, entity: Entity, as_of: date) -> list[dict[str, Any]]:
     ]
 
 
-def collect(
-    plan_items: list[dict[str, Any]],
-    entity: Entity,
-    store: EvidenceStore,
-    edgar: EdgarClient,
-    runlog: RunLog | None,
-) -> dict[str, Any]:
+def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any]:
+    entity, store, edgar = ctx.entity, ctx.store, ctx.edgar
     if not entity.cik:
         return {"error": "no CIK: company is not an SEC filer", "financials": None}
-    item = plan_items[0]["args"]
+    item = next((i["args"] for i in plan_items if i.get("tool") == "edgar.annual_financials"), None)
+    if item is None:
+        item = {"fiscal_year_end": entity.fiscal_year_end, "as_of": ctx.as_of.isoformat()}
     fin = edgar.annual_financials(
         entity.cik,
         fiscal_year_end=item.get("fiscal_year_end"),
         as_of=date.fromisoformat(item["as_of"]),
     )
-    accession_sids = _register_accessions(fin, entity, store, edgar)
+    accession_sids = register_accessions(fin, entity, store, edgar)
     return {"financials": fin, "accession_source_ids": accession_sids}
 
 
-def _register_accessions(
+def register_accessions(
     fin: AnnualFinancials, entity: Entity, store: EvidenceStore, edgar: EdgarClient
 ) -> dict[str, str]:
     """One source record per filing accession; evidence = the selected facts from that filing."""
@@ -109,12 +108,11 @@ def _register_accessions(
 
 def draft(
     brief: Brief,
-    entity: Entity,
     tool_results: dict[str, Any],
-    store: EvidenceStore,
-    runlog: RunLog | None,
+    ctx: ToolContext,
     critic_notes: list[str] | None = None,
 ) -> SectionDraft:
+    entity, runlog = ctx.entity, ctx.runlog
     fin: AnnualFinancials | None = tool_results.get("financials")
     if fin is None or not fin.fiscal_years:
         reason = tool_results.get("error") or "no annual XBRL facts available"

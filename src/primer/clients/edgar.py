@@ -184,6 +184,28 @@ class EdgarClient:
         nodash = accession.replace("-", "")
         return ARCHIVE_URL.format(cik_int=int(cik), accn_nodash=nodash) + f"{accession}-index.htm"
 
+    def filing_index(self, cik: str, accession: str) -> list[dict[str, Any]]:
+        """Files in a filing folder (index.json): name, type, size."""
+        nodash = accession.replace("-", "")
+        data = self._get(ARCHIVE_URL.format(cik_int=int(cik), accn_nodash=nodash) + "index.json")
+        return list((data.get("directory") or {}).get("item") or [])
+
+    def exhibit_url(self, cik: str, accession: str, pattern: str = r"ex.?99") -> str | None:
+        """URL of the first exhibit whose file name matches pattern (default EX-99, the
+        earnings release attached to an Item 2.02 8-K)."""
+        rx = re.compile(pattern, re.I)
+        items = self.filing_index(cik, accession)
+        htm = [
+            i
+            for i in items
+            if rx.search(i.get("name", "")) and i["name"].lower().endswith((".htm", ".html"))
+        ]
+        htm.sort(key=lambda i: i["name"])
+        if not htm:
+            return None
+        nodash = accession.replace("-", "")
+        return ARCHIVE_URL.format(cik_int=int(cik), accn_nodash=nodash) + htm[0]["name"]
+
     def filings(
         self,
         cik: str,
@@ -217,6 +239,7 @@ class EdgarClient:
                     url=base + primary if primary else base,
                     index_url=base + f"{accn}-index.htm",
                     description=recent.get("primaryDocDescription", [None] * n)[i] or None,
+                    items=(recent.get("items") or [None] * n)[i] or None,
                 )
             )
             if limit and len(out) >= limit:
@@ -387,6 +410,144 @@ class EdgarClient:
                 out[fy] = fv
         return out
 
+    def latest_instants(
+        self, cik: str, as_of: date | None = None, forms: tuple[str, ...] = ("10-Q", "10-K")
+    ) -> dict[str, FactValue]:
+        """Most recent balance-sheet instant per metric from any 10-Q/10-K (sections 11, 13).
+        Period label is the instant date; the latest filing wins per date."""
+        cfg = concepts_config()
+        facts = self.companyfacts(cik)
+        as_of = as_of or date.today()
+        out: dict[str, FactValue] = {}
+        for metric, spec in cfg["statements"]["balance_sheet"].items():
+            if spec.get("kind") != "instant" or spec.get("taxonomy", "us-gaap") == "dei":
+                continue
+            for concept in spec.get("concepts", []):
+                node = facts.get("facts", {}).get("us-gaap", {}).get(concept)
+                if not node:
+                    continue
+                best: tuple[date, str, dict[str, Any], str] | None = None
+                for unit, entries in node.get("units", {}).items():
+                    for e in entries:
+                        if e.get("form") not in forms or e.get("start"):
+                            continue
+                        end = date.fromisoformat(e["end"])
+                        if end > as_of:
+                            continue
+                        if best is None or (end, e.get("filed", "")) > (best[0], best[1]):
+                            best = (end, e.get("filed", ""), e, unit)
+                if best:
+                    end, _, e, unit = best
+                    out[metric] = FactValue(
+                        metric=metric,
+                        concept=concept,
+                        taxonomy="us-gaap",
+                        value=float(e["val"]),
+                        unit=unit,
+                        fiscal_year=end.year,
+                        period_label=end.isoformat(),
+                        start=None,
+                        end=end,
+                        accession=e["accn"],
+                        form=e["form"],
+                        filed=date.fromisoformat(e["filed"]),
+                        frame=e.get("frame"),
+                    )
+                    break
+        return out
+
+    def quarterly_series(
+        self,
+        cik: str,
+        metrics: tuple[str, ...] = ("revenue", "net_income", "eps_diluted", "operating_income"),
+        n_quarters: int = 8,
+        as_of: date | None = None,
+    ) -> dict[str, list[FactValue]]:
+        """Discrete quarterly values (80-100 day durations) from 10-Q and 10-K facts, newest
+        first. Q4 is not reported as a quarter in XBRL; when the fiscal year and the
+        nine-month YTD exist, Q4 = FY - YTD is derived and labelled so (section 10)."""
+        cfg = concepts_config()
+        facts = self.companyfacts(cik)
+        as_of = as_of or date.today()
+        specs = {m: s for stmt in cfg["statements"].values() for m, s in stmt.items()}
+        quarterly_forms = ("10-Q", "10-K", "10-K/A", "10-Q/A")
+        out: dict[str, list[FactValue]] = {}
+        for metric in metrics:
+            spec = specs.get(metric)
+            if not spec or spec.get("kind") != "duration":
+                continue
+            taxonomy = spec.get("taxonomy", "us-gaap")
+            rows: dict[date, FactValue] = {}
+            ytd: dict[tuple[date, date], tuple[dict[str, Any], str]] = {}
+            for concept in spec.get("concepts", []):
+                node = facts.get("facts", {}).get(taxonomy, {}).get(concept)
+                if not node:
+                    continue
+                for unit, entries in node.get("units", {}).items():
+                    for e in entries:
+                        if not e.get("start") or e.get("form") not in quarterly_forms:
+                            continue
+                        start, end = date.fromisoformat(e["start"]), date.fromisoformat(e["end"])
+                        if end > as_of:
+                            continue
+                        days = (end - start).days
+                        if 80 <= days <= 100:
+                            prev = rows.get(end)
+                            if prev is None or e.get("filed", "") > prev.filed.isoformat():
+                                rows[end] = FactValue(
+                                    metric=metric,
+                                    concept=concept,
+                                    taxonomy=taxonomy,
+                                    value=float(e["val"]),
+                                    unit=unit,
+                                    fiscal_year=end.year,
+                                    period_label=quarter_label(end),
+                                    start=start,
+                                    end=end,
+                                    accession=e["accn"],
+                                    form=e["form"],
+                                    filed=date.fromisoformat(e["filed"]),
+                                    frame=e.get("frame"),
+                                )
+                        elif 260 <= days <= 290 or 350 <= days <= 380:
+                            k = (start, end)
+                            if k not in ytd or e.get("filed", "") > ytd[k][0].get("filed", ""):
+                                ytd[k] = (e, unit)
+                if rows:
+                    break
+            # derive Q4 = FY - nine-month YTD where both share a start date
+            for (start, end), (e, unit) in ytd.items():
+                if not (350 <= (end - start).days <= 380) or end in rows:
+                    continue
+                nine = [
+                    (k, v)
+                    for k, v in ytd.items()
+                    if k[0] == start and 260 <= (k[1] - k[0]).days <= 290
+                ]
+                if nine:
+                    (_s9, e9), (e9d, _u) = nine[0]
+                    rows[end] = FactValue(
+                        metric=metric,
+                        concept="derived",
+                        taxonomy="derived",
+                        value=float(e["val"]) - float(e9d["val"]),
+                        unit=unit,
+                        fiscal_year=end.year,
+                        period_label=quarter_label(end),
+                        start=e9 + timedelta(days=1),
+                        end=end,
+                        accession=e["accn"],
+                        form=e["form"],
+                        filed=date.fromisoformat(e["filed"]),
+                        frame=None,
+                        restated_from={
+                            "derived": "fiscal year minus nine-month year-to-date",
+                            "ytd_accession": e9d.get("accn"),
+                        },
+                    )
+            out[metric] = [rows[k] for k in sorted(rows, reverse=True)[:n_quarters]]
+        return out
+
     # ---- full-text search ------------------------------------------------------------
 
     def fulltext_search(
@@ -412,6 +573,14 @@ class EdgarClient:
 
 
 GATE_YEAR_METRICS = ("revenue", "net_income", "operating_cash_flow", "capex", "operating_income")
+
+
+def quarter_label(end: date) -> str:
+    """Calendar-quarter label by period end, e.g. 2026-06-30 -> Q2-2026 (fiscal quarters that
+    end a few days before a quarter end round up)."""
+    m = end.month + (1 if end.day >= 25 and end.month % 3 == 0 else 0)
+    q = (min(m, 12) - 1) // 3 + 1
+    return f"Q{q}-{end.year}"
 
 
 def fiscal_year_label(end: date, fye_month: int) -> int:

@@ -51,6 +51,19 @@ def section_budget(section_id: int) -> dict[str, Any]:
     return merged
 
 
+def foundation_budget() -> dict[str, Any]:
+    return dict(budgets_config().get("foundation", {}))
+
+
+def market_data_budget() -> dict[str, Any]:
+    return dict(budgets_config().get("market_data", {}))
+
+
+def trade_press(sector_tag: str) -> list[str]:
+    tp = sources_config().get("trade_press", {})
+    return list(tp.get(sector_tag) or tp.get("default") or [])
+
+
 def llm_available() -> bool:
     key_env = models_config().get("provider_key_env", "ANTHROPIC_API_KEY")
     return bool(os.environ.get(key_env))

@@ -47,11 +47,11 @@ def test_html_to_text_drops_hidden_and_keeps_body():
     text = html_to_text(FAKE_10K_HTML)
     assert "hidden xbrl header" not in text
     assert "global security and aerospace company" in text
-    assert "Aeronautics | 29,000" in text
+    assert "Aeronautics | $ | 30,200" in text
 
 
 def test_chunk_by_item():
     chunks = chunk_by_item(html_to_text(FAKE_10K_HTML))
     items = [c.item for c in chunks]
-    assert items == ["1", "1A", "2"]
-    assert find_chunks(chunks, "F-35")[0].item == "1A"
+    assert items[:3] == ["1", "1A", "2"] and {"7", "8", "10"} <= set(items)
+    assert find_chunks(chunks, "cost overruns")[0].item == "1A"

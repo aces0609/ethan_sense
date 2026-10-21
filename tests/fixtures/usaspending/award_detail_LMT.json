@@ -1,0 +1,128 @@
+{
+ "id": 309496612,
+ "generated_unique_award_id": "CONT_AWD_N0001920C0009_9700_-NONE-_-NONE-",
+ "piid": "N0001920C0009",
+ "type": "D",
+ "type_description": "DEFINITIVE CONTRACT",
+ "description": "THE PURPOSE OF THIS MODIFICATION IS TO AWARD F-35A LRIP 15 USAF  AIRCRAFT* LONG LEAD FUNDING",
+ "total_obligation": 30154748689.06,
+ "base_and_all_options": 30397830432.16,
+ "base_exercised_options": 30379732398.16,
+ "period_of_performance": {
+  "start_date": "2019-11-26",
+  "end_date": "2028-06-01",
+  "last_modified_date": "2026-06-17",
+  "potential_end_date": "2028-06-01 00:00:00"
+ },
+ "place_of_performance": {
+  "location_country_code": "USA",
+  "country_name": "UNITED STATES",
+  "county_code": "439",
+  "county_name": "TARRANT",
+  "city_name": "FORT WORTH",
+  "state_code": "TX",
+  "state_name": "TEXAS",
+  "congressional_code": "12",
+  "zip4": "3619",
+  "zip5": "76108",
+  "address_line1": null,
+  "address_line2": null,
+  "address_line3": null,
+  "foreign_province": null,
+  "foreign_postal_code": null
+ },
+ "awarding_agency": {
+  "id": 1174,
+  "has_agency_page": true,
+  "toptier_agency": {
+   "name": "Department of Defense",
+   "code": "097",
+   "abbreviation": "DOD",
+   "slug": "department-of-defense"
+  },
+  "subtier_agency": {
+   "name": "Department of the Navy",
+   "code": "1700",
+   "abbreviation": "USN"
+  },
+  "office_agency_name": "NAVAL AIR SYSTEMS COMMAND"
+ },
+ "funding_agency": {
+  "id": 1174,
+  "has_agency_page": true,
+  "toptier_agency": {
+   "name": "Department of Defense",
+   "code": "097",
+   "abbreviation": "DOD",
+   "slug": "department-of-defense"
+  },
+  "subtier_agency": {
+   "name": "Department of the Navy",
+   "code": "1700",
+   "abbreviation": "USN"
+  },
+  "office_agency_name": "NAVAL AIR SYSTEMS COMMAND"
+ },
+ "recipient": {
+  "recipient_hash": "6cf5fb1b-4988-d087-5dc1-70939d8fc6c4-C",
+  "recipient_name": "LOCKHEED MARTIN CORPORATION",
+  "recipient_uei": "G4KDGE4JFFK7",
+  "parent_recipient_name": "LOCKHEED MARTIN CORP",
+  "parent_recipient_uei": "ZFN2JJXBLZT3",
+  "location": {
+   "location_country_code": "USA",
+   "country_name": "UNITED STATES",
+   "state_code": "TX",
+   "state_name": "TEXAS",
+   "city_name": "FORT WORTH",
+   "county_code": "439",
+   "county_name": "TARRANT",
+   "address_line1": "1 LOCKHEED BLVD BLDG 10",
+   "address_line2": null,
+   "address_line3": null,
+   "congressional_code": "12",
+   "zip4": "3619",
+   "zip5": "76108",
+   "foreign_postal_code": null,
+   "foreign_province": null
+  }
+ },
+ "naics_hierarchy": {
+  "toptier_code": {
+   "code": "33",
+   "description": "Manufacturing"
+  },
+  "midtier_code": {
+   "code": "3364",
+   "description": "Aerospace Product and Parts Manufacturing"
+  },
+  "base_code": {
+   "code": "336411",
+   "description": "Aircraft Manufacturing"
+  }
+ },
+ "psc_hierarchy": {
+  "toptier_code": {},
+  "midtier_code": {
+   "code": "15",
+   "description": "AEROSPACE CRAFT AND STRUCTURAL COMPONENTS"
+  },
+  "subtier_code": {},
+  "base_code": {
+   "code": "1510",
+   "description": "AIRCRAFT, FIXED WING"
+  }
+ },
+ "date_signed": "2019-11-26",
+ "latest_transaction_contract_data": {
+  "idv_type_description": null,
+  "product_or_service_code": "1510",
+  "naics": "336411",
+  "naics_description": "AIRCRAFT MANUFACTURING",
+  "major_program": null,
+  "program_acronym": null,
+  "product_or_service_description": "AIRCRAFT, FIXED WING",
+  "dod_claimant_program_description": "AIRFRAMES AND SPARES",
+  "type_of_contract_pricing_description": "FIXED PRICE INCENTIVE"
+ }
+}

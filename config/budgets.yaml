@@ -1,34 +1,50 @@
 # Per-section budgets (requirements §8). A section that hits a cap stops and is marked partial.
 # pages: the AlphaSense page estimate (§2); the validator flags >50% over.
+#
+# Credits: the Firecrawl free plan carries 1,000 credits per month and allows 2 concurrent
+# requests. A /search costs 2 per 10 results, a /scrape 1, a /scrape with a JSON schema 5,
+# a /map 1, a PDF parse 1 per page. Section caps below sum to ~250 credits for a 13-section
+# primer; the foundation pack adds ~25 and the market-data pages (shared by sections 6, 10,
+# 12, 13 and scraped once per run) ~35. Firecrawl responses are cached for 7 days, so a
+# rerun of the same company costs nothing.
 defaults:
-  searches: 6            # Firecrawl /search calls per section
-  scrapes: 12            # Firecrawl /scrape or /parse calls per section
-  credits: 40            # Firecrawl credits per section
+  searches: 4            # Firecrawl /search calls per section
+  scrapes: 8             # Firecrawl /scrape or /parse calls per section
+  credits: 24            # Firecrawl credits per section
   tokens: 40000          # model tokens per section research loop
   critic_loops: 2
   pages: 1.5
+  hits_per_search: 8     # results requested per /search (2 credits up to 10)
+
+foundation:
+  searches: 5            # one per transcript quarter + one spare
+  scrapes: 10            # transcripts, webcast PDFs
+  credits: 30
+
+market_data:
+  credits: 40            # six aggregator pages with JSON schemas, scraped once per run
 
 per_primer:
   tokens: 400000
-  credits: 600
+  credits: 420
   samgov_calls: 10
   wall_clock_minutes: 30
 
 sections:
   1:  {pages: 1.0, searches: 0, scrapes: 0, credits: 0}
-  2:  {pages: 1.5}
-  3:  {pages: 2.0}
-  4:  {pages: 2.0, searches: 8, scrapes: 16, credits: 60}
-  5:  {pages: 2.0}
-  6:  {pages: 2.0}
-  7:  {pages: 1.0}
-  8:  {pages: 1.0}
+  2:  {pages: 1.5, searches: 2, scrapes: 4, credits: 12}
+  3:  {pages: 2.0, searches: 4, scrapes: 6, credits: 20}
+  4:  {pages: 2.0, searches: 6, scrapes: 10, credits: 40, use_agent: false}
+  5:  {pages: 2.0, searches: 4, scrapes: 6, credits: 20}
+  6:  {pages: 2.0, searches: 3, scrapes: 6, credits: 20}
+  7:  {pages: 1.0, searches: 3, scrapes: 5, credits: 16}
+  8:  {pages: 1.0, searches: 3, scrapes: 5, credits: 16}
   9:  {pages: 1.5, searches: 1, scrapes: 2, credits: 5}
-  10: {pages: 2.0}
-  11: {pages: 1.5}
-  12: {pages: 2.0}
-  13: {pages: 1.5}
-  14: {pages: 1.0}
+  10: {pages: 2.0, searches: 3, scrapes: 4, credits: 14}
+  11: {pages: 1.5, searches: 3, scrapes: 5, credits: 16}
+  12: {pages: 2.0, searches: 4, scrapes: 6, credits: 20}
+  13: {pages: 1.5, searches: 2, scrapes: 4, credits: 12}
+  14: {pages: 1.0, searches: 3, scrapes: 6, credits: 16}
 
 # Numeric-consistency tolerance by metric family (fraction of the larger value).
 numeric_tolerance:

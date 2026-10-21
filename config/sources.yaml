@@ -31,6 +31,7 @@ limited:
 # Free market-data pages (v1 substitute for a market-data API). Yahoo is accepted with its
 # terms-of-use exposure stated in the frontmatter source_limits.
 market_data:
+  adapter: scraped          # scraped (v1) | fmp (stub; first paid swap)
   yahoo: "https://finance.yahoo.com/quote/{tk}/analysis"
   stockanalysis_forecast: "https://stockanalysis.com/stocks/{tk}/forecast/"
   stockanalysis_statistics: "https://stockanalysis.com/stocks/{tk}/statistics/"
@@ -38,6 +39,25 @@ market_data:
   tipranks: "https://www.tipranks.com/stocks/{tk}/forecast"
   finviz: "https://finviz.com/quote.ashx?t={tk}"
   stooq_csv: "https://stooq.com/q/d/l/?s={tk}.us&i=d"
+  marketbeat_ratings: "https://www.marketbeat.com/stocks/{exchange}/{tk}/forecast/"
+  stockanalysis_history: "https://stockanalysis.com/stocks/{tk}/history/"
+
+# Hosts that publish earnings-call transcripts for free (foundation pack, priority order).
+transcript_hosts:
+  - fool.com
+  - finance.yahoo.com
+  - investing.com
+  - benzinga.com
+  - quartr.com
+
+# Government hosts whose PDFs may carry program status language (section 4 GAO/SAR rule).
+program_status_hosts:
+  - gao.gov
+  - comptroller.defense.gov
+  - defense.gov
+  - crsreports.congress.gov
+  - dote.osd.mil
+  - acq.osd.mil
 
 # Sector trade press, keyed by a sector tag that resolve_entity assigns from the SIC code.
 trade_press:
