@@ -27,6 +27,31 @@ NOT_FIRMS = {
     "Year",
     "At",
     "Capital",
+    "Analysts",
+    "Consensus",
+    "Investors",
+    "Guidance",
+    "Backlog",
+    "Sales",
+    "Segment",
+    "Coverage",
+    "Conflict",
+    "Caveat",
+    "Section",
+    "Table",
+    "Note",
+    "Item",
+    "In",
+    "On",
+    "For",
+    "As",
+    "That",
+    "These",
+    "Those",
+    "Each",
+    "Both",
+    "Street",
+    "Wall",
 }
 
 
@@ -54,11 +79,15 @@ def check_attribution(sections_md: dict[int, str], store: EvidenceStore) -> dict
     """'Firm notes/argues…' must cite a source whose text names that firm."""
     problems = []
     for sec, md in sections_md.items():
-        for sentence in re.split(r"(?<=[.!?])\s+", md):
+        for sentence in re.split(r"(?<=[.!?])\s+|\n", md):
+            if sentence.lstrip().startswith((">", "|", "#")):
+                continue  # blockquotes, table rows and headings are not attributions
             m = ATTRIBUTION.search(sentence)
             if not m or m.group(1).split()[0] in NOT_FIRMS:
                 continue
             firm = m.group(1)
+            if firm.split()[-1] in NOT_FIRMS and len(firm.split()) == 1:
+                continue
             sids = re.findall(r"\[(src_\d{4})\]", sentence)
             if not sids:
                 problems.append(

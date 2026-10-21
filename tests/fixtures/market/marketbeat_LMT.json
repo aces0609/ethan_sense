@@ -1,0 +1,11 @@
+{
+ "consensus_rating": "Moderate Buy",
+ "consensus_price_target": 518.0,
+ "high_price_target": 600.0,
+ "low_price_target": 430.0,
+ "number_of_ratings": 18,
+ "ratings": [
+  {"date": "2026-07-24", "brokerage": "Morgan Stanley", "analyst": "Kristine Liwag", "action": "boost target", "rating": "Overweight", "prior_rating": "Overweight", "price_target": 560.0, "prior_price_target": 540.0},
+  {"date": "2026-07-24", "brokerage": "Bernstein", "analyst": "Douglas Harned", "action": "reiterated", "rating": "Market Perform", "prior_rating": "Market Perform", "price_target": 480.0, "prior_price_target": 480.0}
+ ]
+}

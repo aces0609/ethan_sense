@@ -1,0 +1,13 @@
+{
+ "average_price_target": 515.5,
+ "high_price_target": 590.0,
+ "low_price_target": 440.0,
+ "number_of_analysts": 14,
+ "buy": 9,
+ "hold": 4,
+ "sell": 1,
+ "consensus": "Moderate Buy",
+ "analysts": [
+  {"name": "Scott Micas", "firm": "Melius Research", "rating": "Buy", "price_target": 560.0, "date": "2026-07-24"}
+ ]
+}

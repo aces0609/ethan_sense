@@ -109,7 +109,7 @@ class USAspendingClient:
             tier=1,
             gov_id=gov_id,
             meta=meta or {},
-            dedupe_key=f"usaspending|{url}|{gov_id}|{self.store.as_of.isoformat()}",
+            dedupe_key=f"usaspending|{title}|{gov_id}|{self.store.as_of.isoformat()}",
         )
 
     # ---- recipients ------------------------------------------------------------------

@@ -1,0 +1,22 @@
+{
+ "current_price": 480.25,
+ "current_year_label": "Current Year (2026)",
+ "next_year_label": "Next Year (2027)",
+ "eps_estimate_current_year": 30.2,
+ "eps_estimate_next_year": 32.8,
+ "revenue_estimate_current_year": "80.5B",
+ "revenue_estimate_next_year": "84.2B",
+ "number_of_analysts": 22,
+ "next_quarter_label": "Q3 2026",
+ "eps_estimate_next_quarter": 7.1,
+ "revenue_estimate_next_quarter": "19.8B",
+ "price_target_low": 430.0,
+ "price_target_average": 522.0,
+ "price_target_high": 610.0,
+ "earnings_history": [
+  {"quarter": "Q2 2026", "eps_estimate": 7.62, "eps_actual": 7.94, "surprise_pct": 4.2},
+  {"quarter": "Q1 2026", "eps_estimate": 7.2, "eps_actual": 7.28, "surprise_pct": 1.1},
+  {"quarter": "Q4 2025", "eps_estimate": 6.5, "eps_actual": 6.1, "surprise_pct": -6.2},
+  {"quarter": "Q3 2025", "eps_estimate": 6.4, "eps_actual": 6.84, "surprise_pct": 6.9}
+ ]
+}

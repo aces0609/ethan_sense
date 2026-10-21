@@ -576,11 +576,11 @@ GATE_YEAR_METRICS = ("revenue", "net_income", "operating_cash_flow", "capex", "o
 
 
 def quarter_label(end: date) -> str:
-    """Calendar-quarter label by period end, e.g. 2026-06-30 -> Q2-2026 (fiscal quarters that
-    end a few days before a quarter end round up)."""
-    m = end.month + (1 if end.day >= 25 and end.month % 3 == 0 else 0)
-    q = (min(m, 12) - 1) // 3 + 1
-    return f"Q{q}-{end.year}"
+    """Calendar-quarter label by period end, e.g. 2026-06-30 -> Q2-2026. A 52/53-week quarter
+    that spills a few days into the next month (2026-07-03) still labels the quarter it closes."""
+    if end.day <= 7 and end.month in (1, 4, 7, 10):
+        end = end.replace(day=1) - timedelta(days=1)
+    return f"Q{(end.month - 1) // 3 + 1}-{end.year}"
 
 
 def fiscal_year_label(end: date, fye_month: int) -> int:

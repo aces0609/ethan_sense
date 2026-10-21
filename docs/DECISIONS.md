@@ -38,3 +38,22 @@ Live run: `primer run --company "Lockheed Martin" --ticker LMT --sections 1,9 --
 | Critic score, section 9 | passed; distinct sources 4, exhibit present |
 
 The 30-minute and $10 budgets are not exercised by a structured-only section; Phase 2 measures them.
+
+## 2026-10-21 — Phase 2 build
+
+| # | Decision | Why | Where |
+|---|---|---|---|
+| D2 (default applied) | Per-primer caps: 400k tokens, 420 Firecrawl credits, 10 SAM.gov calls, 30 minutes; per-section search/scrape/credit caps sized so 13 sections sum to ~250 credits | The Firecrawl free plan carries 1,000 credits a month and allows 2 concurrent requests; two primers plus tuning must fit | `config/budgets.yaml`, `FirecrawlClient` caps |
+| D3 | First section-4 eval ticker is Lockheed Martin (F-35, PAC-3, THAAD); Boeing is the second | Phase 1 fixtures and the golden table already cover LMT | PLAN.md §2 status |
+| Planned batches instead of a free ReAct tool loop | Every section's buckets are known from §6, so structured calls plus a bounded query batch is cheaper, reproducible and budgetable; the critic loop supplies iteration (its notes become targeted gap queries in `plan_queries`) | `graph/researcher.py` |
+| Firecrawl responses cached on disk for 7 days | A rerun of the same company (tuning, resume, the LLM pass after a keyless pass) must not spend credits; cache hits are counted separately in run.json | `clients/firecrawl.py`, `output/.cache/firecrawl` |
+| `/parse` implemented as `/scrape` with the PDF parser | The v2 API parses PDFs through /scrape (`parsers: ["pdf"]`); the method name keeps the plan's vocabulary | `FirecrawlClient.parse` |
+| EvidenceStore is a per-run singleton | Thirteen researcher threads registering into separate store instances would assign the same next source id | `EvidenceStore.for_run` |
+| Earnings releases come from EDGAR (8-K Item 2.02, exhibit 99) not the IR site | Tier 1, free, stable URLs, and the quarter label derives from the report date; the IR newsroom is used only for the recent-developments log | `graph/foundation.py` |
+| UEI set discovered from a USAspending name search, then every call filters by UEI | The recipient autocomplete endpoint returns no UEI; the award-search `Recipient UEI` field does; the resolved set is written to sources.json and run.json | `sections/sec04_programs.py` |
+| Market-data pages scraped once per run and shared | Sections 6, 10, 12, 13 need the same six pages; a process memo persisted under `run_dir/market_data/` keeps credits at ~35 per run and makes resume free | `adapters/market_data_scraped.py` |
+| Price from the Stooq close on the as-of date; multiples derived in-agent | Direct CSV GET costs no credits and is dated; aggregator multiples are shown only as secondary rows | `ScrapedMarketData.quote`, section 13 |
+| Numeric conflicts are injected by `assemble` as `> Conflict:` blockquotes in the later section and the gate passes when disclosed | Requirements §2/§7: flag, never reconcile; the retry path only fires for an undisclosed conflict | `graph/main.py: inject_conflicts`, `validate/gate.py` |
+| Key Takeaways bullets validated against the claims list | A bullet is dropped when its figures match no claim (under any display scaling) and no cited source text, when it cites a source no section cites, or when its section was not drafted | `validate/takeaways.py` |
+| Judge rubric falls back to the deterministic critic scores | `primer eval` must run keyless; the scorecard says `judge: template` so a 3/5 gate claim is never made from the fallback | `eval/harness.py` |
+| Golden primers matched to our sections by heading keywords | AlphaSense numbering differs (PLAN.md §7) | `eval/harness.py: split_golden` |

@@ -70,8 +70,7 @@ def handler_for(section: int) -> Any | None:
         mod = importlib.import_module(path)
     except ModuleNotFoundError as e:
         if e.name and e.name.startswith("primer.sections"):
-            HANDLERS[section] = None
-            return None
+            return None  # not cached: a later build (or test) may provide the module
         raise
     HANDLERS[section] = mod
     return mod
@@ -91,6 +90,7 @@ def build_context(state: ResearcherState, section: int) -> ToolContext:
         budget.used_searches = int(b.get("used_searches", 0))
         budget.used_scrapes = int(b.get("used_scrapes", 0))
         budget.exhausted = b.get("exhausted")
+        budget.notes = list(b.get("notes") or [])
     edgar = EdgarClient(runlog=runlog, offline=offline)
     firecrawl = FirecrawlClient(store, runlog=runlog, credit_cap=budget.credits, offline=offline)
     if not firecrawl.available:
@@ -196,6 +196,7 @@ def _budget_state(ctx: ToolContext) -> dict[str, Any]:
         "used_searches": ctx.budget.used_searches,
         "used_scrapes": ctx.budget.used_scrapes,
         "exhausted": ctx.budget.exhausted,
+        "notes": list(dict.fromkeys(ctx.budget.notes)),
     }
 
 

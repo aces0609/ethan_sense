@@ -37,6 +37,12 @@ TYPE_LABELS = {
     "rating_agency": "Rating agency",
     "web": "Web",
     "DEF14A": "DEF 14A",
+    "earnings_release": "Earnings release",
+    "gov_report": "Government report",
+    "dod_announcement": "DoD contract announcement",
+    "market_data": "Market data page",
+    "presentation": "Investor presentation",
+    "transcript": "Earnings call",
 }
 
 

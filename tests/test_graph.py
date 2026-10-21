@@ -57,7 +57,15 @@ def test_phase1_run_on_fixtures(edgar_mock, output_dir):
     assert score["exact_match_rate"] == 1.0 and score["every_number_cited"]
 
 
-def test_unimplemented_section_is_marked_unavailable_not_dropped(edgar_mock, output_dir):
+def test_unimplemented_section_is_marked_unavailable_not_dropped(
+    edgar_mock, output_dir, monkeypatch
+):
+    from primer.graph import researcher
+
+    # simulate a build without the section-7 handler: the section is emitted, never dropped
+    monkeypatch.setitem(researcher.REGISTRY, 7, "primer.sections.sec07_does_not_exist")
+    monkeypatch.delitem(researcher.HANDLERS, 7, raising=False)
+    researcher.HANDLERS.pop(7, None)
     inputs = Inputs(
         company_name="Lockheed Martin",
         ticker="LMT",

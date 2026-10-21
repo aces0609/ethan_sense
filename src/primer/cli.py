@@ -66,25 +66,59 @@ def resume(run_dir: Path = typer.Argument(..., help="output/{slug}/{run_id}")) -
 @app.command()
 def eval(
     run_dir: Path = typer.Option(..., "--run-dir"),
-    golden: Path = typer.Option(..., "--golden", help="Golden financials JSON"),
+    golden: Path | None = typer.Option(
+        None, "--golden", help="Golden primer (markdown/text) for the judge rubric and fact overlap"
+    ),
+    golden_financials: Path | None = typer.Option(
+        None, "--golden-financials", help="Golden financials JSON (section 9, to the dollar)"
+    ),
+    ticker: str | None = typer.Option(
+        None,
+        "--ticker",
+        help="Pick docs/golden/{ticker}.md and {ticker}_financials.json by default",
+    ),
     out: Path | None = typer.Option(
         None, "--out", help="Scorecard directory (default output/eval)"
     ),
 ) -> None:
-    """Score a run's section 9 numbers against a golden table."""
-    from primer.eval.harness import compare_financials, write_scorecard
+    """Score a run: judge rubric per section (>= 3/5 gate), fact overlap with the golden
+    primer, citation resolvability, section 9 to-the-dollar check. Writes a scorecard."""
+    import os
 
-    result = compare_financials(run_dir, golden)
+    from primer.eval.harness import scorecard, write_scorecard
+
+    gdir = Path(os.environ.get("GOLDEN_DIR", REPO_ROOT / "docs" / "golden"))
+    if ticker:
+        tk = ticker.lower()
+        golden = golden or (gdir / f"{tk}.md" if (gdir / f"{tk}.md").exists() else None)
+        golden_financials = golden_financials or (
+            gdir / f"{tk}_financials.json" if (gdir / f"{tk}_financials.json").exists() else None
+        )
+    result = scorecard(run_dir, golden, golden_financials)
     path = write_scorecard(result, out or (output_root() / "eval"))
-    summary = {k: v for k, v in result.items() if k != "rows"}
-    summary["scorecard"] = str(path)
-    typer.echo(json.dumps(summary, indent=2))
-    for r in result["rows"]:
-        if r.get("status") != "match":
-            typer.echo(
-                f"  {r['metric']:24s} {r['period']:8s} {r['status']}: golden={r.get('golden')} run={r.get('run')}"
-            )
-    raise typer.Exit(code=0 if result["exact_match_rate"] in (1.0,) else 1)
+    summary = {
+        "judge_mode": result["judge_mode"],
+        "sections_scored": result["sections_scored"],
+        "min_section_mean": result["min_section_mean"],
+        "mean_section_mean": result["mean_section_mean"],
+        "all_sections_at_least_3": result["all_sections_at_least_3"],
+        "citations": {
+            k: v
+            for k, v in result["citations"].items()
+            if k in ("ok", "rate", "unresolved", "sources", "tier1_share")
+        },
+        "fact_overlap_mean": (result.get("fact_overlap") or {}).get("mean_rate"),
+        "financials_exact_match_rate": (result.get("financials") or {}).get("exact_match_rate"),
+        "run": result.get("run"),
+        "scorecard": str(path),
+    }
+    typer.echo(json.dumps(summary, indent=2, default=str))
+    for sec, sc in sorted(result["section_scores"].items(), key=lambda kv: int(kv[0])):
+        typer.echo(f"  section {sec:>2}: mean {sc.get('mean')}  {sc.get('reason', '')[:100]}")
+    ok = result["all_sections_at_least_3"] and (result["citations"].get("ok") is not False)
+    if result.get("financials") and result["financials"].get("exact_match_rate") not in (None, 1.0):
+        ok = False
+    raise typer.Exit(code=0 if ok else 1)
 
 
 @app.command("mdx-check")

@@ -123,9 +123,12 @@ def find_summing_tables(
     last_years: list[str] = []
     for i, line in enumerate(lines):
         years = YEAR.findall(line)
-        if len(years) >= 2 and not _row(line, i):
-            last_years = years[:6]
         row = _row(line, i)
+        header_like = row is not None and all(1990 <= v <= 2100 for v in row.values)
+        if len(years) >= 2 and (row is None or header_like):
+            last_years = years[:6]
+        if header_like:
+            continue
         if row is None:
             if line.strip() and "|" not in line and run:
                 run = []  # prose breaks a table
