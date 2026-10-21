@@ -130,7 +130,7 @@ def _web(firecrawl_mock, usaspending_mock, sam_entities=None):
         search={
             "GAO report": [trade, gao],
             "selected acquisition report": [gao],
-            "defense.gov Contracts": [dodh, trade],
+            "contract award Contracts": [dodh, trade],
         },
         pages={"gao.gov": GAO_MD, "defense.gov": DOD_MD, "breakingdefense.com": TRADE_MD},
     )

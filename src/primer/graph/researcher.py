@@ -206,6 +206,11 @@ def call_tools(state: ResearcherState) -> dict[str, Any]:
     handler = handler_for(brief.section)
     if handler is None:
         return {"tool_results": {}}
+    if int(state.get("iteration", 0)) > 0 and state.get("tool_results"):
+        # critic loop: the budgets are spent in the first pass, so a second collect would
+        # return less evidence than the first; the draft is rewritten against the same
+        # evidence with the critic's notes (planned gap queries are recorded in run.json)
+        return {"tool_results": state["tool_results"], "budget": _budget_state(ctx)}
     before = set(ctx.store.ids())
     with ctx.runlog.timed(f"sec{brief.section}.call_tools"):
         try:

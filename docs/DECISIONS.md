@@ -57,3 +57,30 @@ The 30-minute and $10 budgets are not exercised by a structured-only section; Ph
 | Key Takeaways bullets validated against the claims list | A bullet is dropped when its figures match no claim (under any display scaling) and no cited source text, when it cites a source no section cites, or when its section was not drafted | `validate/takeaways.py` |
 | Judge rubric falls back to the deterministic critic scores | `primer eval` must run keyless; the scorecard says `judge: template` so a 3/5 gate claim is never made from the fallback | `eval/harness.py` |
 | Golden primers matched to our sections by heading keywords | AlphaSense numbering differs (PLAN.md §7) | `eval/harness.py: split_golden` |
+
+## 2026-10-21 — Phase 2 gate measurement (keyless)
+
+Live runs of `primer run --company "Lockheed Martin" --ticker LMT` and `--company Boeing --ticker BA`, all 14 sections, no model key (template drafter and critic), no SAM.gov key, Firecrawl free plan (1,000 credits a month, 2 concurrent requests, 40 requests a minute).
+
+| Measure | LMT, cold cache | BA, cold cache | LMT, warm cache | BA, warm cache |
+|---|---|---|---|---|
+| Wall-clock | 3.5 min (207 s) | 6.8 min (409 s) | 20 s | 29 s |
+| Firecrawl credits | 93 | 169 | 0 | 6 |
+| Firecrawl 429 retries | 0 (before the per-minute limiter) | 43 | 0 | 1 |
+| EDGAR requests | 23 | 25 | 1 | 2 |
+| USAspending requests | 1 | 10 | 0 | 0 |
+| Cited sources (tier 1) | 44 (33) | 73 (50) | 115 (65) | 107 (60) |
+| Coverage full / partial / unavailable | 4 / 8 / 1 | 5 / 7 / 0 | 9 / 4 / 0 | 7 / 6 / 0 |
+| Critic mean, min / average | 3.0 / 3.88 | 3.0 / 3.97 | 3.33 / 4.24 | 3.33 / 4.10 |
+| Validation gate | needs_review (page budget) | passed | passed | passed |
+| Transcripts found | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
+| Model tokens | 0 | 0 | 0 | 0 |
+
+The cold rows are the first runs before the fixes in commit 2efe7b4 (rate limiter, UEI field, officer and deal parsers, GAO cleaning); the warm rows are the final code on cached pages. A fresh company on the final code is expected to cost 150–200 credits and 4–7 minutes, dominated by the 30 requests-a-minute limiter; the 30-minute budget has a wide margin, so `budgets.yaml` was left at its initial per-section caps (sum ≈ 250 credits + 25 foundation + 35 market data) rather than raised.
+
+What the keyless gate does and does not show:
+
+- No `unavailable` section for either company; every section carries its required exhibit and claims, and the eight gate checks pass (citations, MDX compile, numeric with disclosed conflicts, tier, attribution, recency, coverage, page budget).
+- The remaining `partial` flags are honest: SAM.gov registrations need `SAM_GOV_API_KEY` (locations are a place-of-performance view cross-checked to 10-K Item 2); EDGAR full-text search returns 403 from this network for every query shape tried (section 7 falls back to the 10-K/10-Q notes and press pages); the small per-section web budgets drop planned queries; Boeing's 10-K has no officer table in the parsed layouts and no outlook table in its release.
+- The judge rubric is the deterministic critic score (`judge: template`). The ≥ 3/5 criterion against the AlphaSense reference, the LLM-planned briefs, the narrative prose and the LLM critic notes are untested until `ANTHROPIC_API_KEY` is set; `primer eval --ticker LMT` then scores each section with the judge model, and the Firecrawl cache makes that rerun free of credits.
+- Credits used in this phase: 1,025 → 666 remaining at the end of the day (foundation probes, four cold runs, debugging).

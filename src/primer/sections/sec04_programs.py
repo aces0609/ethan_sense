@@ -916,7 +916,7 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
     res["gao_pages"] = [h.get("source_id") for h in gao_hits if h.get("source_id")]
 
     dod_queries = [
-        f"{ctx.co} contract award defense.gov Contracts {p['program']}"
+        f"{ctx.co} {p['program']} contract award Contracts war.gov OR defense.gov"
         for p in programs[:DOD_PROGRAMS]
     ]
     dod_hits = (
