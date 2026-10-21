@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 import httpx
 
 from primer.clients.cache import CacheMiss, DiskCache
+from primer.clients.ratelimit import TokenBucket
 from primer.config import budgets_config, domain_policy, output_root, tier_for_url
 from primer.evidence.store import EvidenceStore
 from primer.runlog import RunLog
@@ -37,6 +38,9 @@ from primer.state import SourceRecord
 
 API = "https://api.firecrawl.dev/v2"
 _SEM = threading.Semaphore(int(os.environ.get("FIRECRAWL_CONCURRENCY", "2")))
+# the free plan allows 40 requests per minute across endpoints; stay under it process-wide
+_RPM = int(os.environ.get("FIRECRAWL_RPM", "30"))
+_BUCKET = TokenBucket(rate_per_sec=_RPM / 60.0, capacity=3)
 
 CREDITS = {"search_per_10": 2, "scrape": 1, "scrape_json": 5, "map": 1, "parse_per_page": 1}
 
@@ -93,7 +97,7 @@ class FirecrawlClient:
                 raise BudgetExhausted(f"primer credit cap {self.run_cap} reached ({used} used)")
 
     def _post(
-        self, path: str, body: dict[str, Any], retries: int = 4, cacheable: bool = True
+        self, path: str, body: dict[str, Any], retries: int = 5, cacheable: bool = True
     ) -> tuple[dict[str, Any], bool]:
         """Return (response json, cached)."""
         key = f"POST {path} {json.dumps(body, sort_keys=True)}"
@@ -108,6 +112,7 @@ class FirecrawlClient:
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         delay = 2.0
         for attempt in range(retries):
+            _BUCKET.acquire()
             with _SEM:
                 if self.runlog:
                     self.runlog.count("firecrawl_requests")
@@ -119,7 +124,18 @@ class FirecrawlClient:
                         delay *= 2
                         continue
                     raise FirecrawlError(f"{path}: {e!r}") from e
-            if r.status_code in (429, 502, 503, 504) and attempt < retries - 1:
+            if r.status_code == 429 and attempt < retries - 1:
+                wait = delay
+                try:
+                    wait = float(r.json().get("retry_after_seconds") or delay) + 1.0
+                except (ValueError, AttributeError):
+                    pass
+                if self.runlog:
+                    self.runlog.count("firecrawl_429")
+                time.sleep(min(max(wait, delay), 90.0))
+                delay *= 2
+                continue
+            if r.status_code in (502, 503, 504) and attempt < retries - 1:
                 time.sleep(delay)
                 delay *= 2
                 continue

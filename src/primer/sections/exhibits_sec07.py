@@ -41,12 +41,18 @@ _MONTH_NUM = {
         ]
     )
 }
-NAME = r"([A-Z][\w&.'\- ]{2,60}?)"
+NAME = r"([A-Z][\w&'\- ]{2,60}?)"  # no period: a target never spans a sentence
 ACQ_RE = re.compile(
     r"\b(agreement to acquire|agreed to acquire|completed the acquisition of|completed its acquisition of"
     r"|acquisition of|acquire|acquired|to purchase|purchased|merger with)\s+(?:all of\s+)?(?:the\s+)?"
     + NAME
     + r"\s+(for|from|in a|in an)\b[^.$]{0,80}?\$\s?([\d][\d.,]*)\s*(billion|million|bn|mn)\b"
+)
+# amount before the target: "we paid $360 million, in cash, for the acquisition of Rapid Solutions"
+PAID_RE = re.compile(
+    r"\b(paid|spent|invested)\s+\$\s?(?P<val>[\d][\d.,]*)\s*(?P<scale>billion|million|bn|mn)\b"
+    r"[^.$]{0,60}?\b(?:for|on|in)\s+(?:the\s+)?(?:acquisition|purchase)\s+of\s+(?:all of\s+)?(?:the\s+)?"
+    r"(?:[A-Z]\w+(?:'s|’s)\s+)?(?P<target>[A-Z][\w&'\-]*(?:\s+[A-Z][\w&'\-]*){0,5})(?:\s+(?:business|segment))?"
 )
 DIV_RE = re.compile(
     r"\b(divestiture of|divested|sold|sale of|completed the sale of|spun off|spin-off of)\s+"
@@ -143,16 +149,22 @@ def extract_deals(
     flat = " ".join(text.split())
     out: list[Deal] = []
     seen: set[tuple[str, float]] = set()
-    for rx, kind in ((ACQ_RE, "acq"), (DIV_RE, "div")):
+    for rx, kind in ((ACQ_RE, "acq"), (PAID_RE, "acq"), (DIV_RE, "div")):
         for m in rx.finditer(flat):
-            verb = m.group(1).lower()
-            target = _clean_target(m.group(2))
+            if rx is PAID_RE:
+                verb = "completed the acquisition of"
+                target = _clean_target(m.group("target"))
+                val_txt, scale_txt = m.group("val"), m.group("scale")
+            else:
+                verb = m.group(1).lower()
+                target = _clean_target(m.group(2))
+                val_txt, scale_txt = m.group(4), m.group(5)
             if not target or norm_company(target) in GENERIC_TARGETS or len(target) < 3:
                 continue
             if target.split()[0].lower() in ("the", "a", "an", "our", "its", "additional"):
                 continue
             try:
-                value = float(m.group(4).replace(",", "")) * SCALE[m.group(5).lower()]
+                value = float(val_txt.replace(",", "")) * SCALE[scale_txt.lower()]
             except (ValueError, KeyError):
                 continue
             key = (norm_company(target), value)

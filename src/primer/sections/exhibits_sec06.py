@@ -97,8 +97,18 @@ def parse_release_outlook(text: str, default_fy: int | None = None) -> ReleaseOu
     m = OUTLOOK_FY.search(text)
     out = ReleaseOutlook(fy=int(m.group(1)) if m else default_fy)
     lines = text.splitlines()
+    # the heading is "Outlook" or "2026 Financial Outlook" on its own line; a bullet such as
+    # "Updates 2026 financial outlook" is not the table
     start = next(
-        (i for i, ln in enumerate(lines) if re.fullmatch(r"\s*\|?\s*outlook\s*\|?\s*", ln, re.I)),
+        (
+            i
+            for i, ln in enumerate(lines)
+            if re.fullmatch(
+                r"\s*\|?\s*(?:20\d{2}\s+)?(?:financial\s+)?outlook\s*(?:\|\s*(?:20\d{2})?\s*)*",
+                ln.strip(),
+                re.I,
+            )
+        ),
         None,
     )
     if start is None:

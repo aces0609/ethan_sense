@@ -12,6 +12,7 @@ draft  -> officer table and ownership-concentration bullets (deterministic), gov
 from __future__ import annotations
 
 import json
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -31,6 +32,7 @@ from primer.sections.exhibits_sec08 import (
     officer_rows,
     ownership_rows,
 )
+from primer.sections.text_tools import exec_officer_rows
 from primer.state import Brief, SectionDraft
 
 OWNERSHIP_FORMS = ["SC 13G", "SC 13G/A", "SC 13D", "SC 13D/A"]
@@ -138,6 +140,19 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
     if proxies:
         out["proxy_sid"] = proxies[0]
     item10, sid10 = ctx.item_text("10")
+    if sid10 and len(exec_officer_rows(item10)) < 3:
+        # many 10-Ks incorporate Item 10 by reference and list officers in Part I
+        whole = ctx.store.text(sid10)
+        marks = [
+            m.start()
+            for m in re.finditer(
+                r"Information about our Executive Officers|Executive Officers of the Registrant|Information About Our Executive Officers",
+                whole,
+            )
+        ]
+        if marks:
+            item10 = whole[marks[-1] : marks[-1] + 15000]
+            out["notes"].append("officer list taken from the 10-K Part I executive-officer section")
     if not sid10:
         tenks = ctx.foundation_sources("10-K")
         if tenks:

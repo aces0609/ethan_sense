@@ -205,6 +205,9 @@ def _isolated_output(tmp_path, monkeypatch):
     monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
     monkeypatch.delenv("SAM_GOV_API_KEY", raising=False)
     monkeypatch.setenv("PRIMER_NO_CRITIC_LOOP", "1")
+    from primer.clients import firecrawl as _fc
+
+    monkeypatch.setattr(_fc._BUCKET, "rate", 10_000.0)  # no per-minute throttle on mocked calls
     from primer.sections import common
 
     common._MEMO.clear()
@@ -381,7 +384,7 @@ def firecrawl_mock(monkeypatch):
     def make(**tables) -> FirecrawlRouter:
         monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test")
         fr = FirecrawlRouter(**tables)
-        mock = respx.mock(assert_all_called=False, assert_all_mocked=False)
+        mock = respx.mock(assert_all_called=False, assert_all_mocked=True)
         mock.start()
         mock.route(host="api.firecrawl.dev").mock(side_effect=fr)
         routers.append((mock, fr))
@@ -397,7 +400,7 @@ def usaspending_mock():
     """Recorded Lockheed responses: name discovery page, UEI-filtered awards, subagency
     categories for FY2025/FY2026, one award detail. Routed by request body / path."""
     fx = _usaspending_fixtures()
-    with respx.mock(assert_all_called=False, assert_all_mocked=False) as router:
+    with respx.mock(assert_all_called=False, assert_all_mocked=True) as router:
 
         def by_award(request):
             body = json.loads(request.content or b"{}")

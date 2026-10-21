@@ -93,6 +93,19 @@ NAME_TOKEN = re.compile(
 )
 
 GENERIC_ACRONYMS = {
+    "AIR",
+    "SEA",
+    "LAND",
+    "ARMY",
+    "NAVY",
+    "USAF",
+    "USN",
+    "DOW",
+    "LRIP",
+    "IDIQ",
+    "OEM",
+    "R&D",
+    "IRAD",
     "USA",
     "US",
     "DOD",
@@ -121,14 +134,11 @@ GENERIC_ACRONYMS = {
     "FAR",
     "DFARS",
     "CAS",
-    "OEM",
     "MRO",
     "RDT",
     "ITAR",
     "EAR",
     "OTA",
-    "IDIQ",
-    "LRIP",
     "FRP",
     "EMD",
     "AAC",
@@ -138,8 +148,6 @@ GENERIC_ACRONYMS = {
     "TAS",
     "FY",
     "CY",
-    "USAF",
-    "USN",
     "USMC",
     "USCG",
     "USSF",
@@ -160,6 +168,23 @@ GENERIC_ACRONYMS = {
     "ASC",
 }
 GENERIC_WORDS = {
+    "command",
+    "control",
+    "system",
+    "systems",
+    "support",
+    "services",
+    "engineering",
+    "logistics",
+    "training",
+    "sustainment",
+    "production",
+    "mission",
+    "program",
+    "programs",
+    "contract",
+    "modernization",
+    "integration",
     "government",
     "congress",
     "europe",
@@ -217,8 +242,6 @@ GENERIC_WORDS = {
     "marine",
     "corps",
     "space",
-    "systems",
-    "services",
     "products",
     "international",
     "commercial",
@@ -227,9 +250,6 @@ GENERIC_WORDS = {
     "security",
     "agency",
     "office",
-    "program",
-    "programs",
-    "mission",
     "missile",
     "missiles",
     "aircraft",
@@ -346,7 +366,7 @@ def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
     items.append(
         {
             "tool": "firecrawl.search",
-            "query_template": "{co} contract award defense.gov Contracts {program}",
+            "query_template": "{co} contract award Contracts {program} defense.gov OR war.gov",
             "bucket": "dod",
             "why": "DoD daily contract announcements",
         }
@@ -615,6 +635,17 @@ def _ensure_record(
     return rec.source_id
 
 
+def _clean_markdown(text: str) -> str:
+    """Drop images, link targets, share buttons and headings so sentences split cleanly."""
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    t = re.sub(r"(?m)^\s*#+.*$", " ", t)
+    t = re.sub(
+        r"Skip to (?:main content|Highlights)|Share (?:on|by) [A-Za-z ]+|Published:[^.]*\.", " ", t
+    )
+    return re.sub(r"[ \t]+", " ", t)
+
+
 def _host_ok(url: str, hosts: list[str]) -> bool:
     host = urlparse(url).netloc.lower()
     return any(host == h or host.endswith("." + h) for h in hosts)
@@ -629,18 +660,32 @@ def gao_finding(ctx: ToolContext, sid: str, terms: list[str]) -> dict[str, Any] 
     if not _host_ok(rec.url, hosts):
         return None
     text = ctx.store.text(sid)
-    body = "\n".join(
-        ln for ln in text.splitlines() if not ln.lstrip().startswith("#") and "Published:" not in ln
-    )
+    body = _clean_markdown(text)
+    # GAO product pages: the "What GAO Found" block is the finding; prefer it
+    i = body.find("What GAO Found")
+    if i >= 0:
+        body = body[i + len("What GAO Found") :]
     found = None
     for s in sentences(body):
         if (
-            40 <= len(s) <= 400
+            40 <= len(s) <= 500
             and STATUS_RE.search(s)
             and any(_term_regex(t).search(s.upper()) for t in terms)
         ):
             found = s
             break
+    if found is None:
+        # the program may be named in the heading or a neighbouring sentence; accept a status
+        # sentence when the page as a whole names the program and the sentence names DOD/program
+        if any(_term_regex(t).search((rec.title or "").upper()) for t in terms):
+            for s in sentences(body):
+                if (
+                    40 <= len(s) <= 500
+                    and STATUS_RE.search(s)
+                    and re.search(r"\b(program|aircraft|missile|contractor|DOD|Department)\b", s)
+                ):
+                    found = s
+                    break
     if not found:
         return None
     report = GAO_REPORT.search(text)
@@ -878,7 +923,7 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
         ctx.web_research(
             dod_queries,
             type="dod_announcement",
-            require_domains=("defense.gov",),
+            require_domains=("defense.gov", "war.gov"),
             max_scrapes=DOD_SCRAPES,
         )
         if dod_queries

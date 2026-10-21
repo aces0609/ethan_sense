@@ -584,69 +584,89 @@ class ScrapedMarketData:
         t.consensus_rating = j.get("consensus")
         return t
 
+    def _price_rows(self, ticker: str) -> tuple[list[tuple[date, float]], str, str, str] | None:
+        """(rows, publisher, url, raw) from the first free daily-price source that answers:
+        the Yahoo chart endpoint (JSON, direct GET), then the Stooq CSV. Stooq sits behind a
+        browser check from some networks, which is why Yahoo is tried first. Each attempt is
+        cached for one day; a source that answers with something other than prices is skipped,
+        never partially parsed."""
+        tk = ticker.upper()
+        attempts = [
+            (
+                "Yahoo Finance",
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{tk}?range=2y&interval=1d",
+                "yahoo_chart",
+            ),
+            ("Stooq", self._url("stooq_csv", ticker), "stooq"),
+        ]
+        headers = {"User-Agent": "Mozilla/5.0 (ethan_sense primer)"}
+        for publisher, url, ns in attempts:
+            cache = DiskCache(output_root(), ns, ttl_seconds=24 * 3600, offline=self.offline)
+
+            def fetch(url=url, ns=ns) -> str:
+                if self.runlog:
+                    self.runlog.count(f"{ns}_requests")
+                r = self.http.get(url, headers=headers)
+                r.raise_for_status()
+                return r.text
+
+            try:
+                text = cache.get_or_fetch(f"{url}|{date.today().isoformat()}", fetch)
+            except Exception as e:
+                self.failures[ns] = str(e)[:200]
+                continue
+            rows = _parse_yahoo_chart(text) if ns == "yahoo_chart" else _parse_stooq_csv(text)
+            if rows:
+                return rows, publisher, url, text
+            self.failures[ns] = "unexpected response (no price rows)"
+        return None
+
     def price_history(self, ticker: str, as_of: date | None = None) -> PriceHistory:
-        """Stooq daily CSV by direct GET (cached one day); close on/before as_of and 52-week range."""
+        """Daily closes from a free source (Yahoo chart JSON, else Stooq CSV), registered as one
+        source record; close on/before as_of and the 52-week range."""
         as_of = as_of or self.as_of
-        url = self._url("stooq_csv", ticker)
         h = PriceHistory(ticker=ticker)
-        cache = DiskCache(output_root(), "stooq", ttl_seconds=24 * 3600, offline=self.offline)
-
-        def fetch() -> str:
-            if self.runlog:
-                self.runlog.count("stooq_requests")
-            r = self.http.get(url, headers={"User-Agent": "Mozilla/5.0 (ethan_sense primer)"})
-            r.raise_for_status()
-            return r.text
-
-        try:
-            text = cache.get_or_fetch(f"{url}|{date.today().isoformat()}", fetch)
-        except Exception as e:
+        got = self._price_rows(ticker)
+        if got is None:
             h.partial = True
-            h.notes.append(f"stooq: {e}")
-            self.failures["stooq"] = str(e)
+            h.notes.append(
+                "price history: no free source answered ("
+                + "; ".join(
+                    f"{k}: {v}" for k, v in self.failures.items() if k in ("yahoo_chart", "stooq")
+                )
+                + ")"
+            )
             return h
-        lines = [ln for ln in text.splitlines() if ln.strip()]
-        if not lines or not lines[0].lower().startswith("date"):
+        rows, publisher, url, raw = got
+        rows = [(d, c) for d, c in rows if d <= as_of]
+        rows.sort()
+        if not rows:
             h.partial = True
-            h.notes.append("stooq: unexpected CSV")
-            self.failures["stooq"] = "unexpected CSV"
+            h.notes.append("price history: no rows on or before as_of")
             return h
+        csv_lines = [f"{d.isoformat()},{c:.4f}" for d, c in rows[-300:]]
         rec = self.store.register(
-            f"# Stooq daily prices {ticker.upper()}.US\n\nSource: {url}\n\n```csv\n"
-            + "\n".join(lines[-300:])
+            f"# Daily closing prices {ticker.upper()} ({publisher})\n\nSource: {url}\n\n```csv\nDate,Close\n"
+            + "\n".join(csv_lines)
             + "\n```\n",
             type="market_data",
-            publisher="Stooq",
-            title=f"Daily price history {ticker.upper()} (Stooq CSV)",
+            publisher=publisher,
+            title=f"Daily price history {ticker.upper()} ({publisher})",
             url=url,
             published_date=as_of,
             tier=2,
-            meta={"rows": len(lines) - 1},
-            dedupe_key=f"stooq|{ticker.upper()}|{as_of.isoformat()}",
+            meta={"rows": len(rows)},
+            dedupe_key=f"prices|{publisher}|{ticker.upper()}|{as_of.isoformat()}",
         )
         h.source_id = rec.source_id
-        for ln in lines[1:]:
-            cells = ln.split(",")
-            if len(cells) < 5:
-                continue
-            try:
-                d = date.fromisoformat(cells[0])
-                close = float(cells[4])
-            except ValueError:
-                continue
-            if d <= as_of:
-                h.points.append(PricePoint(d, close))
-        if not h.points:
-            h.partial = True
-            h.notes.append("stooq: no rows on or before as_of")
-            return h
+        h.points = [PricePoint(d, c) for d, c in rows]
         last = h.points[-1]
         h.close_as_of = Datum(
             last.close,
             "USD",
             last.date,
             rec.source_id,
-            "closing price (Stooq)",
+            f"closing price ({publisher})",
             last.date.isoformat(),
         )
         year = [p for p in h.points if p.date >= as_of - timedelta(days=365)]
@@ -654,9 +674,11 @@ class ScrapedMarketData:
             hi = max(year, key=lambda p: p.close)
             lo = min(year, key=lambda p: p.close)
             h.high_52w = Datum(
-                hi.close, "USD", hi.date, rec.source_id, "52-week high close (Stooq)"
+                hi.close, "USD", hi.date, rec.source_id, f"52-week high close ({publisher})"
             )
-            h.low_52w = Datum(lo.close, "USD", lo.date, rec.source_id, "52-week low close (Stooq)")
+            h.low_52w = Datum(
+                lo.close, "USD", lo.date, rec.source_id, f"52-week low close ({publisher})"
+            )
         return h
 
     def analyst_coverage(self, ticker: str) -> AnalystCoverage:
@@ -716,3 +738,38 @@ class ScrapedMarketData:
 
 def datum_dict(d: Datum | None) -> dict[str, Any] | None:
     return asdict(d) if d else None
+
+
+def _parse_stooq_csv(text: str) -> list[tuple[date, float]]:
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines or not lines[0].lower().startswith("date"):
+        return []
+    out = []
+    for ln in lines[1:]:
+        cells = ln.split(",")
+        if len(cells) < 5:
+            continue
+        try:
+            out.append((date.fromisoformat(cells[0]), float(cells[4])))
+        except ValueError:
+            continue
+    return out
+
+
+def _parse_yahoo_chart(text: str) -> list[tuple[date, float]]:
+    """query1.finance.yahoo.com/v8/finance/chart JSON: timestamps + indicators.quote[0].close."""
+    try:
+        data = json.loads(text)
+        result = data["chart"]["result"][0]
+        stamps = result["timestamp"]
+        closes = result["indicators"]["quote"][0]["close"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        return []
+    from datetime import datetime
+
+    out = []
+    for ts, c in zip(stamps, closes, strict=False):
+        if c is None:
+            continue
+        out.append((datetime.utcfromtimestamp(int(ts)).date(), float(c)))
+    return out

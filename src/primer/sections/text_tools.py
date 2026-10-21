@@ -198,11 +198,26 @@ def segment_names_from_text(text: str) -> list[str]:
     return names[:8]
 
 
+OFFICER_LINE = re.compile(
+    r"^\s*([A-Z][A-Za-z.'\-]+(?: [A-Z][A-Za-z.'\-]+){1,4}(?:,? (?:Jr|Sr|II|III|IV)\.?)?)"
+    r"\s*\(age\s+(\d{2})\)[,:]?\s+(.{4,160})$"
+)
+
+
 def exec_officer_rows(text: str) -> list[dict[str, str]]:
-    """Rows of an executive-officer table: name | age | title (10-K Item 10 / DEF 14A)."""
+    """Rows of an executive-officer list: a table (name | age | title) or the paragraph
+    layout 'Name (age NN), Title' used in 10-K Part I 'Information about our Executive
+    Officers' sections."""
     out = []
     seen = set()
     for line in text.splitlines():
+        m = OFFICER_LINE.match(line.strip())
+        if m and 28 <= int(m.group(2)) <= 85:
+            name, title = m.group(1).strip(), m.group(3).strip(" .")
+            if name not in seen:
+                seen.add(name)
+                out.append({"name": name, "age": m.group(2), "title": title[:160]})
+            continue
         cells = [c.strip() for c in line.split("|") if c.strip()]
         if len(cells) < 3:
             continue

@@ -138,7 +138,10 @@ def check_coverage(coverage: dict[int, str], requested: list[int]) -> dict:
 def check_page_budget(sections_md: dict[int, str]) -> dict:
     over = []
     for sec, md in sections_md.items():
-        words = len(md.split())
+        prose = "\n".join(
+            ln for ln in md.splitlines() if not ln.startswith("|") and not ln.startswith(">")
+        )
+        words = len(prose.split())
         pages = words / 450
         budget = float(section_budget(sec).get("pages", 1.5))
         if pages > budget * 1.5:

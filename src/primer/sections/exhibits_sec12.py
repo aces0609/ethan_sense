@@ -281,8 +281,9 @@ def page_points(
     seen: set[str] = set()
     for m in PAGE_ACTION.finditer(flat):
         firm, verb, rest = m.group(1).strip(), m.group(2).lower(), m.group(3)
-        first = firm.split()[0]
-        if first in NOT_FIRM_FIRST or norm_company(firm).split()[0] in me:
+        words = norm_company(firm).split()
+        first = firm.split()[0] if firm.split() else ""
+        if not words or first in NOT_FIRM_FIRST or words[0] in me:
             continue
         if verb in ("upgraded", "raised"):
             side = "bull"

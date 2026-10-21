@@ -33,6 +33,8 @@ IDV_TYPES = ["IDV_A", "IDV_B", "IDV_B_A", "IDV_B_B", "IDV_B_C", "IDV_C", "IDV_D"
 AWARD_FIELDS = [
     "Award ID",
     "Recipient Name",
+    "Recipient UEI",
+    "Recipient DUNS Number",
     "recipient_id",
     "Start Date",
     "End Date",
