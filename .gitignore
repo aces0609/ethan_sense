@@ -1,0 +1,29 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# run output and caches
+output/
+*.sqlite
+*.sqlite3
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# node sidecar
+node_modules/
+
+# editors
+.idea/
+.vscode/
+*.swp
+.DS_Store
