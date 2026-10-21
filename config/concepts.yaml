@@ -1,0 +1,132 @@
+# XBRL concepts for the Historical Financials section (requirements §6 row 9).
+# Each metric lists concept names in fallback order; the first one with facts for the
+# period wins and the chosen concept is recorded on the claim. `kind` is duration
+# (flows, P&L and cash flow) or instant (balance sheet). `taxonomy` defaults to us-gaap.
+# Values are in USD unless `unit` says otherwise.
+
+statements:
+  income_statement:
+    revenue:
+      label: Revenue
+      kind: duration
+      concepts: [Revenues, RevenueFromContractWithCustomerExcludingAssessedTax, SalesRevenueNet, RevenuesNetOfInterestExpense]
+    cost_of_revenue:
+      label: Cost of revenue
+      kind: duration
+      concepts: [CostOfRevenue, CostOfGoodsAndServicesSold, CostOfGoodsSold, CostOfServices]
+    gross_profit:
+      label: Gross profit
+      kind: duration
+      concepts: [GrossProfit]
+      derive: revenue - cost_of_revenue
+    operating_income:
+      label: Operating income
+      kind: duration
+      concepts: [OperatingIncomeLoss]
+    interest_expense:
+      label: Interest expense
+      kind: duration
+      concepts: [InterestExpense, InterestExpenseNonoperating, InterestExpenseDebt]
+    pretax_income:
+      label: Pre-tax income
+      kind: duration
+      concepts: [IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest, IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments]
+    income_tax:
+      label: Income tax expense
+      kind: duration
+      concepts: [IncomeTaxExpenseBenefit]
+    net_income:
+      label: Net income
+      kind: duration
+      concepts: [NetIncomeLoss, ProfitLoss, NetIncomeLossAvailableToCommonStockholdersBasic]
+    eps_diluted:
+      label: Diluted EPS
+      kind: duration
+      unit: USD/shares
+      concepts: [EarningsPerShareDiluted]
+    diluted_shares:
+      label: Diluted weighted shares
+      kind: duration
+      unit: shares
+      concepts: [WeightedAverageNumberOfDilutedSharesOutstanding]
+
+  cash_flow:
+    operating_cash_flow:
+      label: Cash from operations
+      kind: duration
+      concepts: [NetCashProvidedByUsedInOperatingActivities, NetCashProvidedByUsedInOperatingActivitiesContinuingOperations]
+    capex:
+      label: Capital expenditures
+      kind: duration
+      concepts: [PaymentsToAcquirePropertyPlantAndEquipment, PaymentsToAcquireProductiveAssets]
+    depreciation_amortization:
+      label: Depreciation and amortization
+      kind: duration
+      concepts: [DepreciationDepletionAndAmortization, DepreciationAndAmortization, DepreciationAmortizationAndAccretionNet]
+    dividends_paid:
+      label: Dividends paid
+      kind: duration
+      concepts: [PaymentsOfDividendsCommonStock, PaymentsOfDividends]
+    buybacks:
+      label: Share repurchases
+      kind: duration
+      concepts: [PaymentsForRepurchaseOfCommonStock]
+    free_cash_flow:
+      label: Free cash flow (derived)
+      kind: duration
+      concepts: []
+      derive: operating_cash_flow - capex
+
+  balance_sheet:
+    cash:
+      label: Cash and equivalents
+      kind: instant
+      concepts: [CashAndCashEquivalentsAtCarryingValue, CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents]
+    total_assets:
+      label: Total assets
+      kind: instant
+      concepts: [Assets]
+    long_term_debt:
+      label: Long-term debt
+      kind: instant
+      concepts: [LongTermDebtNoncurrent, LongTermDebtAndCapitalLeaseObligations, LongTermDebt]
+    short_term_debt:
+      label: Short-term debt and current maturities
+      kind: instant
+      concepts: [LongTermDebtCurrent, DebtCurrent, ShortTermBorrowings]
+    total_debt:
+      label: Total debt (derived)
+      kind: instant
+      concepts: []
+      derive: long_term_debt + short_term_debt
+    net_debt:
+      label: Net debt (derived)
+      kind: instant
+      concepts: []
+      derive: total_debt - cash
+    total_liabilities:
+      label: Total liabilities
+      kind: instant
+      concepts: [Liabilities]
+    stockholders_equity:
+      label: Stockholders' equity
+      kind: instant
+      concepts: [StockholdersEquity, StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest]
+    shares_outstanding:
+      label: Shares outstanding (cover-page date, after FYE)
+      kind: instant
+      unit: shares
+      taxonomy: dei
+      concepts: [EntityCommonStockSharesOutstanding]
+
+# Ratios rendered under the tables, each labelled derived with its formula.
+derived_ratios:
+  gross_margin: {formula: "gross_profit / revenue", label: "Gross margin"}
+  operating_margin: {formula: "operating_income / revenue", label: "Operating margin"}
+  net_margin: {formula: "net_income / revenue", label: "Net margin"}
+  fcf_margin: {formula: "free_cash_flow / revenue", label: "FCF margin"}
+  capex_pct_revenue: {formula: "capex / revenue", label: "Capex % of revenue"}
+
+# Forms whose facts count for annual values.
+annual_forms: ["10-K", "10-K/A", "10-KT", "20-F", "40-F"]
+fiscal_years: 4

@@ -158,6 +158,8 @@ Ordered work items. Each has a test that proves it.
 
 **Phase 1 definition of done:** items 1.1–1.11 merged, the LMT run meets the gate, cost and time recorded.
 
+**Status (2026-10-21): done.** Items 1.1–1.11 are implemented and covered by 29 tests on recorded fixtures. The live LMT run (sections 1 and 9) passes the validation gate with FY2022–FY2024 revenue, net income, operating cash flow and capex matching the golden table to the dollar and every cell citing a companyfacts record. Measurements are in [docs/DECISIONS.md](docs/DECISIONS.md). Two caveats: the golden table's FY2025 column is still unfilled pending the AlphaSense figures, and the run so far is keyless (template narrative), so the LLM drafter and critic paths are untested live.
+
 ---
 
 ## 2. Phase 2 — Fan-out

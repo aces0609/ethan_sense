@@ -1,0 +1,56 @@
+# Domain policy and source-bucket hints (requirements §4, §8).
+
+# Tier assignment by host. Anything not listed is tier 2 (open web).
+tier1_hosts:
+  - sec.gov
+  - data.sec.gov
+  - efts.sec.gov
+  - api.usaspending.gov
+  - usaspending.gov
+  - api.sam.gov
+  - sam.gov
+  - gao.gov
+  - comptroller.defense.gov
+  - defense.gov
+  - crsreports.congress.gov
+  - dote.osd.mil
+
+# Never fetch. Paywalls and sites whose terms forbid automated access outright.
+deny:
+  - seekingalpha.com
+  - bloomberg.com
+  - ft.com
+  - wsj.com
+
+# Fetched but cited by headline and URL only, marked access: limited.
+limited:
+  - barrons.com
+  - reuters.com
+  - nytimes.com
+
+# Free market-data pages (v1 substitute for a market-data API). Yahoo is accepted with its
+# terms-of-use exposure stated in the frontmatter source_limits.
+market_data:
+  yahoo: "https://finance.yahoo.com/quote/{tk}/analysis"
+  stockanalysis_forecast: "https://stockanalysis.com/stocks/{tk}/forecast/"
+  stockanalysis_statistics: "https://stockanalysis.com/stocks/{tk}/statistics/"
+  marketbeat: "https://www.marketbeat.com/stocks/{exchange}/{tk}/forecast/"
+  tipranks: "https://www.tipranks.com/stocks/{tk}/forecast"
+  finviz: "https://finviz.com/quote.ashx?t={tk}"
+  stooq_csv: "https://stooq.com/q/d/l/?s={tk}.us&i=d"
+
+# Sector trade press, keyed by a sector tag that resolve_entity assigns from the SIC code.
+trade_press:
+  aerospace_defense:
+    - breakingdefense.com
+    - defensenews.com
+    - janes.com
+    - aviationweek.com
+    - flightglobal.com
+    - airandspaceforces.com
+  default: []
+
+# Frontmatter source_limits that every v1 primer carries (requirements §2).
+source_limits:
+  - "No sell-side research or expert-call transcripts were available; broker views are second-hand from news and rating aggregators"
+  - "Market data scraped from public aggregator pages, not a licensed feed"

@@ -1,0 +1,29 @@
+# Model roles (requirements §5 "Model roles"). Each role is a LangChain init_chat_model
+# string "provider:model". Set a role to "template" to use the deterministic template
+# writer (no LLM), which is what runs when no provider key is present.
+roles:
+  planner:          # plan_sections
+    model: anthropic:claude-opus-5-5
+    temperature: 0
+  query_planner:    # plan_queries inside each researcher
+    model: anthropic:claude-haiku-5-5
+    temperature: 0
+  tool_loop:        # call_tools ReAct loop
+    model: anthropic:claude-haiku-5-5
+    temperature: 0
+  drafter:          # compress_and_draft
+    model: anthropic:claude-opus-5-5
+    temperature: 0
+  critic:           # critic
+    model: anthropic:claude-opus-5-5
+    temperature: 0
+  synthesizer:      # key_takeaways
+    model: anthropic:claude-opus-5-5
+    temperature: 0
+  judge:            # eval harness rubric
+    model: anthropic:claude-opus-5-5
+    temperature: 0
+
+# Environment variable whose presence enables the provider above. If unset, every role
+# falls back to "template".
+provider_key_env: ANTHROPIC_API_KEY
