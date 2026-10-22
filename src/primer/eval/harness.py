@@ -34,20 +34,20 @@ from primer.validate.citations import check_citations
 SCALE = {"USD millions": 1e6, "USD thousands": 1e3, "USD": 1.0}
 
 SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
-    1: ("takeaway", "summary"),
-    2: ("overview", "company profile", "business description"),
-    3: ("product", "service", "technology"),
-    4: ("program", "contract"),
-    5: ("market", "competitive", "competition", "industry"),
-    6: ("strategy", "growth"),
-    7: ("acquisition", "m&a", "deal"),
-    8: ("management", "governance", "leadership", "board"),
+    1: ("key takeaway", "takeaway", "executive summary"),
+    2: ("company overview", "overview", "company profile", "business description"),
+    3: ("products, services", "product", "defense technologies", "technology"),
+    4: ("key programs", "program", "contract"),
+    5: ("market dynamics", "competitive positioning", "market", "competitive", "competition"),
+    6: ("strategy & growth", "strategy", "growth"),
+    7: ("acquisition history", "acquisition", "m&a"),
+    8: ("corporate governance", "management", "governance", "leadership"),
     9: ("historical financial", "financial performance", "financials"),
     10: ("operating performance", "benchmark", "kpi"),
     11: ("capital structure", "liquidity", "balance sheet", "debt"),
-    12: ("thesis", "debate", "bull", "bear"),
+    12: ("investment thesis", "thesis", "debate", "bull vs"),
     13: ("valuation",),
-    14: ("recent development", "recent events", "news"),
+    14: ("recent developments", "recent development", "recent events", "news"),
 }
 
 
@@ -123,9 +123,65 @@ def split_sections(markdown: str) -> dict[int, str]:
     return out
 
 
+RESULT_MARK = "RESULT FOR QUERY"
+
+
+PAGE_NOISE = re.compile(
+    r"^(RESULT FOR QUERY|RESULTS FOR QUERY:?|Page \d+ of \d+|©\d{4}, AlphaSense.*|<!-- page \d+ -->)\s*$"
+)
+
+
+def _split_alphasense(text: str) -> dict[int, str]:
+    """AlphaSense export layout (pypdf text). The numbered table of contents lists the section
+    titles; each section then starts in the body with the same title, unnumbered, on its own
+    line. Page headers ('RESULT FOR QUERY', 'Page N of M', the copyright line) are dropped.
+    The unnumbered 'Key Takeaways' and 'Company Overview' sections that precede the numbered
+    ones are picked up by their own titles. Titles map to our numbering by keyword."""
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    lines = [ln for ln in lines if not PAGE_NOISE.match(ln.strip())]
+    toc_i = next(
+        (i for i, ln in enumerate(lines) if ln.strip().upper() == "TABLE OF CONTENTS"), None
+    )
+    titles: list[str] = []
+    body_start = 0
+    if toc_i is not None:
+        j = toc_i + 1
+        while j < len(lines):
+            m = re.match(r"^\s*\d{1,2}\.\s+(.+?)\s*$", lines[j])
+            if not m:
+                break
+            titles.append(m.group(1))
+            j += 1
+        body_start = j
+    titles = ["Key Takeaways", "Company Overview", *titles]
+    # locate each title's first occurrence in the body as a line start
+    found: list[tuple[int, str]] = []
+    for title in titles:
+        head = title.split(":")[0].strip().lower()
+        for i in range(body_start, len(lines)):
+            ln = lines[i].strip().lower()
+            if ln.startswith(head) and len(ln) <= 100:
+                found.append((i, title))
+                break
+    found.sort()
+    out: dict[int, str] = {}
+    for n, (i, title) in enumerate(found):
+        end_i = found[n + 1][0] if n + 1 < len(found) else len(lines)
+        body = "\n".join(lines[i + 1 : end_i]).strip()
+        sec = _match_section(title)
+        if sec and len(body) > 200:
+            out[sec] = (out.get(sec, "") + "\n\n" + body).strip()
+    return out
+
+
 def split_golden(text: str) -> dict[int, str]:
     """A golden primer in any markdown/plain layout: headings (#, ##, or 'N. Title' lines) are
-    mapped to our section numbers by keyword; unmatched text is dropped."""
+    mapped to our section numbers by keyword; unmatched text is dropped. The AlphaSense
+    export layout is recognised by its 'RESULT FOR QUERY' markers."""
+    if text.count(RESULT_MARK) >= 3 or "TABLE OF CONTENTS" in text:
+        got = _split_alphasense(text)
+        if got:
+            return got
     lines = text.splitlines()
     heads: list[tuple[int, str]] = []
     for i, line in enumerate(lines):
