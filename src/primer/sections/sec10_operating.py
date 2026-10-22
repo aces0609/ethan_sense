@@ -230,7 +230,7 @@ def _quarter_rows(tr: dict[str, Any]) -> list[dict[str, Any]]:
             if fv.taxonomy == "derived":
                 v.concept, v.note = (
                     "derived",
-                    "fiscal-year value minus nine-month year-to-date value (XBRL)",
+                    "fiscal-year value minus nine-month year-to-date value (XBRL; additive flow metrics only)",
                 )
             rows.setdefault(v.period, {}).setdefault(metric, v)
     for rel in tr.get("releases") or []:
@@ -267,6 +267,27 @@ def _quarter_rows(tr: dict[str, Any]) -> list[dict[str, Any]]:
         for lbl in sorted(rows, key=key, reverse=True)
         if rows[lbl]
     ]
+
+
+def q4_gap_notes(quarters: list[dict[str, Any]]) -> list[str]:
+    """Coverage notes for fiscal fourth quarters whose per-share and attributable figures are
+    absent: XBRL reports no discrete Q4, the FY-minus-YTD subtraction is not used for diluted
+    EPS or net income (review 2026-10-21 §5 item 5), and no Q4 release in the foundation pack
+    supplied them, so the cells read n/a."""
+    out: list[str] = []
+    for q in quarters:
+        v = q["vals"]
+        rev = v.get("revenue") or v.get("operating_income")
+        if rev is None or rev.concept != "derived":
+            continue
+        missing = [RESULT_LABELS[m].lower() for m in ("eps_diluted", "net_income") if not v.get(m)]
+        if missing:
+            out.append(
+                f"{q['label']} {' and '.join(missing)} n/a: not derived as fiscal year minus "
+                "nine-month year-to-date (per-share and attributable figures are not additive) and "
+                "no Q4 earnings release in the foundation pack reports them"
+            )
+    return out
 
 
 def _consensus_rows(cons: Any) -> dict[str, dict[str, Any]]:
@@ -352,6 +373,7 @@ def draft(
     notes = [
         *(tool_results.get("notes") or []),
         *(n for ex in (kpi, segments, guidance) for n in ex.notes),
+        *q4_gap_notes(quarters),
     ]
 
     web_sids = [r["source_id"] for r in (tool_results.get("web") or []) if r.get("source_id")]
@@ -443,7 +465,9 @@ def _caveat(ctx: ToolContext, quarters: list[dict[str, Any]], tr: dict[str, Any]
     bits = []
     if quarters:
         bits.append(
-            f"quarterly actuals are XBRL where the 10-Q/10-K facts exist and the earnings release otherwise, labelled by calendar quarter of the period end (latest {quarters[0]['label']})"
+            f"quarterly actuals are XBRL where the 10-Q/10-K facts exist and the earnings release otherwise, labelled by calendar quarter of the period end (latest {quarters[0]['label']}); "
+            "fourth-quarter revenue and operating income are derived as fiscal year minus nine-month year-to-date where XBRL reports no discrete quarter, "
+            "while diluted EPS and net income are never derived that way and come from the Q4 release or read n/a"
         )
     cons = tr.get("consensus")
     if cons is not None and cons.source_id:

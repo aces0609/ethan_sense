@@ -79,6 +79,29 @@ Filing text comes from `html_to_text` (`evidence/html.py`): table cells are join
    agency tables cites a government record whose source has a `gov_id`; `role: not confirmed`
    when no record names prime/sub; obligated, ceiling and announced values are labelled;
    status language only from gao.gov / defense.gov / comptroller PDFs.
+9. **Recent events reach the sections that need them.** Section 14 runs in the first wave;
+   sections 3, 6, 8, 10 and 12 run in a second wave with its dated event log on
+   `ctx.recent_events` (`common.recent_events(ctx)` returns `{date, event, detail, source_id}`
+   rows; `common.recent_events_block(ctx)` is the prompt fragment `draft_section` adds
+   automatically, and those source ids are citable). A settled event is never described as
+   pending or absent.
+10. **Prose is for the reader.** `finalize_draft` runs `common.scrub_pipeline_vocabulary`
+    (rewrites "the exhibit", "structured facts", "the fetched evidence"; moves sentences about
+    search or scrape caps into the coverage line) and `common.drop_first_party_perspectives`
+    (a `### Perspectives` list survives only when a bullet cites a second-party source: trade
+    press, GAO, a peer filing, a rating agency; the company's own documents and Wikipedia do
+    not count). Do not rely on it to clean a template path that is sloppy by design.
+11. **Exhibits are validated before scoring.** The critic runs `validate/exhibits.py`
+    (`apply_exhibit_check`): a table with "n/a" segments the prose names, cover-page or
+    forward-looking boilerplate, numerals stripped from program names, ownership labels that
+    are not people or institutions, transcript timestamps or scraped page chrome is dropped
+    whole, its claims are pruned, coverage becomes `partial`, and the coverage line says why.
+    The prose is kept. Build the exhibit so it passes rather than counting on the drop.
+12. **Cross-section reconciliation** (`graph/reconcile.py`) runs after the second wave: a
+    sentence saying a fact is absent from the sources is replaced with a cross-reference when
+    another section has it, and two sections giving different values for a point-in-time
+    attribute get a `> Conflict:` line. Write denials in the standard forms ("no X appears in
+    the sources reviewed", "X cannot be confirmed") so the matcher can read them.
 
 ## Tests
 

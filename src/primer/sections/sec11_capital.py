@@ -35,7 +35,7 @@ from primer.sections.exhibits_sec11 import (
     maturity_table,
     ratings_table,
 )
-from primer.sections.exhibits_sec13 import Val
+from primer.sections.exhibits_sec13 import Val, net_debt_formula, short_term_investments_val
 from primer.sections.sec09_financials import register_accessions
 from primer.sections.sec13_valuation import fy_vals, register_instants
 from primer.sections.style import fmt_money
@@ -57,7 +57,15 @@ FY_METRICS = (
     "dividends_paid",
     "buybacks",
 )
-INSTANTS = ("cash", "long_term_debt", "short_term_debt", "total_assets", "stockholders_equity")
+INSTANTS = (
+    "cash",
+    "short_term_investments",
+    "cash_and_short_term_investments",
+    "long_term_debt",
+    "short_term_debt",
+    "total_assets",
+    "stockholders_equity",
+)
 
 
 def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
@@ -213,16 +221,21 @@ def _vals(
             "long-term debt + short-term debt"
             + ("" if st else " (no current-debt fact; 0 assumed)"),
         )
+    sti = short_term_investments_val(v)
+    if sti:
+        v["short_term_investments"] = sti
+    else:
+        v.pop("short_term_investments", None)
     td = v.get("total_debt")
     if td and cash:
         v["net_debt"] = Val(
-            td.value - cash.value,
-            sorted(set(td.sids) | set(cash.sids)),
+            td.value - cash.value - (sti.value if sti else 0.0),
+            sorted(set(td.sids) | set(cash.sids) | set(sti.sids if sti else [])),
             td.period,
             "derived",
             "USD",
             "derived",
-            "total debt − cash",
+            net_debt_formula(sti is not None),
         )  # type: ignore[operator]
     oi, da = v.get("operating_income"), v.get("depreciation_amortization")
     if oi and da:
@@ -353,8 +366,9 @@ def _caveat(vals: dict[str, Val], fy: int, inst: dict[str, FactValue]) -> str:
     )
     form = next((fv.form for fv in inst.values()), "10-Q/10-K")
     return caveat_line(
-        f"balance-sheet figures are the latest XBRL instant ({form}, {d}); EBITDA, leverage and interest coverage are derived "
-        f"in-agent for FY{fy} with the definitions in the row names; revolver capacity, maturities and ratings are read from the "
+        f"balance-sheet figures are the latest XBRL instant ({form}, {d}); net debt is total debt − cash − short-term "
+        f"investments, and EBITDA, leverage and interest coverage are derived in-agent for FY{fy} with the definitions in "
+        f"the row names; revolver capacity, maturities and ratings are read from the "
         f"filing text and cited to it; rating-agency pages are second-hand unless the agency's own release was fetched"
     )
 
@@ -365,10 +379,14 @@ def _lead_sentences(vals: dict[str, Val], fy: int, tr: dict[str, Any]) -> list[s
 
     out: list[str] = []
     cash, td, nd = vals.get("cash"), vals.get("total_debt"), vals.get("net_debt")
+    sti = vals.get("short_term_investments")
     if cash and td:
-        s = f"At {cash.period} the company held ${fmt_money(cash.value)} million of cash{cite(cash)} against ${fmt_money(td.value)} million of total debt (derived: long-term plus short-term debt){cite(td)}"
+        s = f"At {cash.period} the company held ${fmt_money(cash.value)} million of cash{cite(cash)}"
+        if sti:
+            s += f" and ${fmt_money(sti.value)} million of short-term investments{cite(sti)}"
+        s += f" against ${fmt_money(td.value)} million of total debt (derived: long-term plus short-term debt){cite(td)}"
         if nd:
-            s += f", for net debt of ${fmt_money(nd.value)} million (derived){cite(nd)}"
+            s += f", for net debt of ${fmt_money(nd.value)} million (derived: {nd.note}){cite(nd)}"
         out.append(s + ".")
     gl, nl, eb = vals.get("gross_leverage"), vals.get("net_leverage"), vals.get("ebitda")
     if gl and eb:

@@ -49,6 +49,12 @@ def pad_cik(cik: str | int) -> str:
     return str(int(cik)).zfill(10)
 
 
+# metrics whose Q4 value is never derived as fiscal year minus nine-month YTD (review
+# 2026-10-21 §5 item 5): per-share figures are not additive and attributable net income can
+# differ between the FY and YTD concepts picked
+NO_YTD_DERIVATION = ("eps_diluted", "net_income")
+
+
 @dataclass
 class FactValue:
     metric: str
@@ -302,21 +308,26 @@ class EdgarClient:
                     {"form": fv.form, "filed": fv.filed.isoformat(), "fy_label": fv.fiscal_year},
                 )
 
-        # derived metrics
+        # derived metrics (in config order, so a derived operand defined earlier is available)
         for _stmt, metrics in cfg["statements"].items():
             for metric, spec in metrics.items():
                 formula = spec.get("derive")
                 if not formula:
                     continue
+                optional = tuple(spec.get("optional") or ())
                 for fy in result.fiscal_years:
                     if result.facts.get(metric, {}).get(fy) is not None:
                         continue
-                    val = _eval_formula(formula, lambda m, fy=fy: result.value(m, fy))
+                    val = _eval_formula(
+                        formula, lambda m, fy=fy: result.value(m, fy), optional=optional
+                    )
                     if val is not None:
                         result.derived.setdefault(metric, {})[fy] = val
 
         for _stmt, metrics in cfg["statements"].items():
-            for metric in metrics:
+            for metric, spec in metrics.items():
+                if spec.get("report_missing", True) is False:
+                    continue
                 missing = [fy for fy in result.fiscal_years if result.value(metric, fy) is None]
                 if missing:
                     result.missing[metric] = missing
@@ -462,10 +473,15 @@ class EdgarClient:
         metrics: tuple[str, ...] = ("revenue", "net_income", "eps_diluted", "operating_income"),
         n_quarters: int = 8,
         as_of: date | None = None,
+        no_ytd_derivation: tuple[str, ...] = NO_YTD_DERIVATION,
     ) -> dict[str, list[FactValue]]:
         """Discrete quarterly values (80-100 day durations) from 10-Q and 10-K facts, newest
         first. Q4 is not reported as a quarter in XBRL; when the fiscal year and the
-        nine-month YTD exist, Q4 = FY - YTD is derived and labelled so (section 10)."""
+        nine-month YTD exist, Q4 = FY - YTD is derived and labelled so (section 10) for
+        additive flow metrics only. Per-share and attributable figures (`no_ytd_derivation`:
+        diluted EPS, net income) are never derived that way: EPS is not additive across
+        periods and the review found the subtraction off the release by $0.50; section 10
+        takes the Q4 figures from the earnings release or leaves the cell n/a."""
         cfg = concepts_config()
         facts = self.companyfacts(cik)
         as_of = as_of or date.today()
@@ -515,8 +531,10 @@ class EdgarClient:
                                 ytd[k] = (e, unit)
                 if rows:
                     break
-            # derive Q4 = FY - nine-month YTD where both share a start date
+            # derive Q4 = FY - nine-month YTD where both share a start date (additive flows only)
             for (start, end), (e, unit) in ytd.items():
+                if metric in no_ytd_derivation:
+                    break
                 if not (350 <= (end - start).days <= 380) or end in rows:
                     continue
                 nine = [
@@ -598,8 +616,10 @@ def _fye_on_or_before(d: date, fye_month: int, fye_day: int) -> date:
     return candidate
 
 
-def _eval_formula(formula: str, lookup) -> float | None:
-    """Evaluate 'a - b' / 'a + b' style formulas over metric names; None if any operand missing."""
+def _eval_formula(formula: str, lookup, optional: tuple[str, ...] = ()) -> float | None:
+    """Evaluate 'a - b' / 'a + b' style formulas over metric names; None if any required
+    operand is missing. Operands named in `optional` count as 0 when missing (net debt nets
+    short-term investments when the filer reports them and cash only otherwise)."""
     tokens = re.findall(r"[a-z_]+|[+\-]", formula)
     total: float | None = None
     sign = 1.0
@@ -611,9 +631,25 @@ def _eval_formula(formula: str, lookup) -> float | None:
         else:
             v = lookup(t)
             if v is None:
+                if t in optional:
+                    continue
                 return None
             total = (total or 0.0) + sign * float(v)
     return total
+
+
+def formula_operands(formula: str) -> list[str]:
+    return re.findall(r"[a-z_]+", formula)
+
+
+def derived_note(spec: dict[str, Any], lookup) -> str:
+    """The formula to print for a derived metric, with any optional operand that was absent
+    named ('... (short_term_investments not reported; 0 assumed)')."""
+    formula = str(spec.get("derive") or "")
+    absent = [op for op in spec.get("optional") or () if lookup(op) is None]
+    if absent:
+        formula += " (" + ", ".join(absent) + " not reported; 0 assumed)"
+    return formula
 
 
 def filing_primary_url(cik: str, accession: str, primary_document: str) -> str:

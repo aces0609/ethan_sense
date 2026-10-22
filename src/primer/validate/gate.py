@@ -9,6 +9,7 @@ from typing import Any
 
 from primer.evidence.store import EvidenceStore
 from primer.validate.citations import check_citations, check_source_tokens_left
+from primer.validate.exhibits import check_exhibits_gate
 from primer.validate.mdx_compile import check_frontmatter, check_mdx_compiles
 from primer.validate.numeric import check_numeric
 from primer.validate.rules import (
@@ -56,6 +57,7 @@ def run_all(
         "recency": check_recency(sections_md, store, as_of),
         "coverage": check_coverage(coverage, requested),
         "page_budget": check_page_budget(sections_md),
+        "exhibits": check_exhibits_gate(sections_md),
     }
     notes: dict[int, list[str]] = {}
     undisclosed = []
@@ -80,6 +82,10 @@ def run_all(
         notes.setdefault(p["section"], []).append(f"attribution to {p['firm']}: {p['reason']}")
     for o in checks["page_budget"]["over"]:
         notes.setdefault(o["section"], []).append(f"cut to {o['budget']} pages (now ~{o['pages']})")
+    for p in checks["exhibits"]["problems"]:
+        notes.setdefault(p["section"], []).append(
+            f"exhibit '{p['exhibit']}' fails the exhibit validator ({p['rule']}): {p['reason']}"
+        )
 
     hard = [
         "citations",
@@ -91,6 +97,7 @@ def run_all(
         "recency",
         "coverage",
         "page_budget",
+        "exhibits",
     ]
     passed = all(checks[k]["ok"] for k in hard) and checks["mdx_compile"]["ok"] is not False
     return ValidationReport(passed=passed, checks=checks, section_notes=notes)

@@ -82,6 +82,22 @@ statements:
       label: Cash and equivalents
       kind: instant
       concepts: [CashAndCashEquivalentsAtCarryingValue, CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents]
+    # Short-term investments and marketable securities are netted in net debt and EV (review
+    # 2026-10-21 §5 item 2: Boeing holds ~$18bn outside "cash"). Ordered fallbacks; when a
+    # filer only reports the combined cash + short-term investments concept, the investments
+    # are derived as the difference. A filer with no such fact nets cash only (0 assumed) and
+    # the derived claim says so.
+    short_term_investments:
+      label: Short-term investments and marketable securities
+      kind: instant
+      concepts: [ShortTermInvestments, MarketableSecuritiesCurrent, AvailableForSaleSecuritiesDebtSecuritiesCurrent, DebtSecuritiesAvailableForSaleCurrent, HeldToMaturitySecuritiesCurrent, OtherShortTermInvestments]
+      derive: cash_and_short_term_investments - cash
+      report_missing: false
+    cash_and_short_term_investments:
+      label: Cash, equivalents and short-term investments
+      kind: instant
+      concepts: [CashCashEquivalentsAndShortTermInvestments]
+      report_missing: false
     total_assets:
       label: Total assets
       kind: instant
@@ -103,7 +119,8 @@ statements:
       label: Net debt (derived)
       kind: instant
       concepts: []
-      derive: total_debt - cash
+      derive: total_debt - cash - short_term_investments
+      optional: [short_term_investments]
     total_liabilities:
       label: Total liabilities
       kind: instant

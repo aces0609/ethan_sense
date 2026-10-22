@@ -56,7 +56,13 @@ FY_METRICS = (
     "operating_cash_flow",
     "capex",
 )
-INSTANT_METRICS = ("cash", "long_term_debt", "short_term_debt")
+INSTANT_METRICS = (
+    "cash",
+    "short_term_investments",
+    "cash_and_short_term_investments",
+    "long_term_debt",
+    "short_term_debt",
+)
 
 
 # ---- shared XBRL helpers (also used by sections 10 and 11) ---------------------------------
@@ -439,8 +445,8 @@ def _caveat(
     if sh:
         bits.append(f"shares outstanding are the XBRL cover-page count as of {sh.period}")
     bits.append(
-        f"market cap, EV, EBITDA (FY{fy}) and every multiple are derived in-agent with the formulas shown; "
-        "LTM and NTM figures are kept in separate tables"
+        f"market cap, EV (market cap + total debt − cash − short-term investments), EBITDA (FY{fy}) and every "
+        "multiple are derived in-agent with the formulas shown; LTM and NTM figures are kept in separate tables"
     )
     if consensus is not None and consensus.source_id:
         bits.append(
@@ -473,9 +479,18 @@ def _lead_sentences(
         vals.get("net_debt"),
     )
     if td and nd:
+        sti = vals.get("short_term_investments")
+        held = (
+            f"${fmt_money(vals['cash'].value)} million of cash{cite(vals['cash'])}"
+            if vals.get("cash")
+            else ""
+        )
+        if sti:
+            held += f" and ${fmt_money(sti.value)} million of short-term investments{cite(sti)}"
         out.append(
-            f"Total debt at {td.period} was ${fmt_money(td.value)} million (derived: long-term plus short-term debt){cite(td)}, "
-            f"for net debt of ${fmt_money(nd.value)} million (derived: total debt minus cash){cite(nd)}."
+            f"Total debt at {td.period} was ${fmt_money(td.value)} million (derived: long-term plus short-term debt){cite(td)}"
+            + (f" against {held}" if held else "")
+            + f", for net debt of ${fmt_money(nd.value)} million (derived: {nd.note}){cite(nd)}."
         )
     if eb:
         out.append(
@@ -483,7 +498,7 @@ def _lead_sentences(
         )
     if ev and eb and vals.get("ev_ebitda_ltm_ratio"):
         out.append(
-            f"Enterprise value of ${fmt_money(ev.value)} million (derived: market cap plus total debt minus cash){cite(ev)} "
+            f"Enterprise value of ${fmt_money(ev.value)} million (derived: {ev.note}){cite(ev)} "
             f"implies {vals['ev_ebitda_ltm_ratio'].value:.1f}x FY{fy} EBITDA (derived)."
         )
     pe, pf = vals.get("pe_ltm_ratio"), vals.get("p_fcf_ltm_ratio")

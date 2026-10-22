@@ -205,7 +205,8 @@ def test_sec06_targets_vs_consensus_with_dates(edgar_mock, firecrawl_mock):
     assert any(kind == "scrape" and u == DECK_URL for kind, u in fc.calls)
     assert draft["coverage"] == "full"
     searches = [q for kind, q in fc.calls if kind == "search" and "transcript" not in q.lower()]
-    assert len(searches) == 3
+    # six template queries fill the section 6 cap of 6 (2026-10-22); the rate-target query runs
+    assert len(searches) == 6 and any("production rate target" in q for q in searches)
 
 
 def test_sec06_keyless_path_targets_from_release_and_mdna(edgar_mock):
@@ -224,4 +225,4 @@ def test_sec06_keyless_path_targets_from_release_and_mdna(edgar_mock):
     assert draft["coverage"] == "partial"
     tail = md.split("> Coverage:")[-1]
     assert "Firecrawl" in tail and "consensus" in tail
-    assert draft["budget"]["searches"] == "0/3" and draft["budget"]["scrapes"] == "0/6"
+    assert draft["budget"]["searches"] == "0/6" and draft["budget"]["scrapes"] == "0/12"

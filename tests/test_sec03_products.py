@@ -164,7 +164,9 @@ def test_sec03_product_table_and_competitor_comparison(edgar_mock, firecrawl_moc
     assert "On competition, the 10-K states" in prose
     assert draft["coverage"] == "full"
     searches = [q for kind, q in fc.calls if kind == "search" and "transcript" not in q.lower()]
-    assert len(searches) == 4 and any("Aeronautics 2025" in q for q in searches)
+    # six template queries plus two segment queries fill the section 3 cap of 8 (2026-10-22)
+    assert len(searches) == 8 and any("Aeronautics 2025" in q for q in searches)
+    assert any("sixth-generation fighter" in q for q in searches)
 
 
 def test_sec03_keyless_path_builds_table_from_10k_alone(edgar_mock):
@@ -178,4 +180,4 @@ def test_sec03_keyless_path_builds_table_from_10k_alone(edgar_mock):
     assert len(rows) >= 4 and all(f"[{k_sid}]" in r[4] for r in rows)
     assert draft["coverage"] == "partial"
     assert "Firecrawl" in draft["markdown"].split("> Coverage:")[-1]
-    assert draft["budget"]["searches"] == "0/4"
+    assert draft["budget"]["searches"] == "0/8"  # budgets.yaml section 3 (raised 2026-10-22)

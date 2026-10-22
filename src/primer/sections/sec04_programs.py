@@ -627,12 +627,13 @@ def _ensure_record(
     rec = ctx.store.register(
         "```json\n" + json.dumps(payload, indent=1)[:200_000] + "\n```",
         type="api:usaspending",
+        published_date=ctx.store.as_of,
         publisher="USAspending.gov",
         title=title,
-        url="https://www.usaspending.gov/search",
+        url="https://api.usaspending.gov/api/v2/search/spending_by_award/",
         tier=1,
         gov_id=gov_id,
-        meta={"section": SECTION},
+        meta={"section": SECTION, "request": payload.get("request") or payload.get("filters")},
         dedupe_key=f"usaspending|sec4|{gov_id}|{ctx.store.as_of.isoformat()}",
     )
     seen[rec.source_id] = gov_id

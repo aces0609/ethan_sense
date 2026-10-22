@@ -184,6 +184,11 @@ class PrimerState(TypedDict, total=False):
     retries: Annotated[dict[int, int], dict_merge]
     mdx_path: str
     key_takeaways: str
+    # section 14's dated events ({date, event, detail, source_id}), set by propagate_recent
+    # after the first researcher wave and passed to the sections that read them
+    recent_events: list[dict[str, Any]]
+    recent_wave: int  # how many times propagate_recent has run (1 = second wave pending)
+    reconciliation: dict[str, Any]  # cross-section reconciliation record (also in run.json)
 
 
 class ResearcherState(TypedDict, total=False):
@@ -196,6 +201,7 @@ class ResearcherState(TypedDict, total=False):
     brief: dict[str, Any]
     critic_notes: list[str]
     iteration: int
+    recent_events: list[dict[str, Any]]  # from section 14, for sections 3, 6, 8, 10, 12
     budget: dict[str, Any]
     plan_items: list[dict[str, Any]]
     tool_results: dict[str, Any]

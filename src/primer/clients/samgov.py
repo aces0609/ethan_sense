@@ -78,6 +78,7 @@ class SamGovClient:
         return self.store.register(
             "```json\n" + json.dumps(payload, indent=1)[:200_000] + "\n```",
             type="api:samgov",
+            published_date=self.store.as_of,
             publisher="SAM.gov",
             title=title,
             url=url,

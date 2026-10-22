@@ -173,7 +173,9 @@ def test_sec05_swot_and_peers_with_web(edgar_mock, firecrawl_mock, fixture_json)
     assert pc["value"] == len(peer_rows) and pc["unit"] == "count"
     assert draft["coverage"] == "full"
     searches = [q for kind, q in fc.calls if kind == "search" and "transcript" not in q.lower()]
-    assert len(searches) == 4 and any(" vs " in q for q in searches)
+    # five generic plus two per-peer templates for two peers (9) stop at the section 5 cap of 8
+    assert len(searches) == 8 and any(" vs " in q for q in searches)
+    assert any("order backlog OR fleet" in q for q in searches)
 
 
 def test_sec05_keyless_path_swot_from_filings(edgar_mock):
@@ -193,4 +195,4 @@ def test_sec05_keyless_path_swot_from_filings(edgar_mock):
     assert all("named as a competitor in the 10-K" in r[2] for r in peer_rows)
     assert draft["coverage"] == "partial"
     assert "Firecrawl" in md.split("> Coverage:")[-1]
-    assert draft["budget"]["searches"] == "0/4"
+    assert draft["budget"]["searches"] == "0/8"  # budgets.yaml section 5 (raised 2026-10-22)

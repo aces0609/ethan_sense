@@ -114,7 +114,9 @@ def eval(
     }
     typer.echo(json.dumps(summary, indent=2, default=str))
     for sec, sc in sorted(result["section_scores"].items(), key=lambda kv: int(kv[0])):
-        typer.echo(f"  section {sec:>2}: mean {sc.get('mean')}  {sc.get('reason', '')[:100]}")
+        # the Windows console may not encode the judge's punctuation; never let that crash
+        reason = sc.get("reason", "")[:100].encode("ascii", "replace").decode("ascii")
+        typer.echo(f"  section {sec:>2}: mean {sc.get('mean')}  {reason}")
     ok = result["all_sections_at_least_3"] and (result["citations"].get("ok") is not False)
     if result.get("financials") and result["financials"].get("exact_match_rate") not in (None, 1.0):
         ok = False

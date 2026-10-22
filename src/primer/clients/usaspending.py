@@ -60,6 +60,27 @@ def fiscal_year_bounds(fy: int) -> tuple[date, date]:
     return date(fy - 1, 10, 1), date(fy, 9, 30)
 
 
+def request_summary(
+    filters: dict[str, Any], sort: str | None = None, page: int | None = None
+) -> str:
+    """A short, reproducible description of a search request for the source title:
+    'recipients UEI1, UEI2; 2024-10-01 to 2026-09-30; award types A,B,C,D; keywords F-35'."""
+    bits: list[str] = []
+    names = filters.get("recipient_search_text") or []
+    if names:
+        bits.append("recipients " + ", ".join(str(n) for n in names[:4]))
+    tp = (filters.get("time_period") or [{}])[0]
+    if tp.get("start_date") or tp.get("end_date"):
+        bits.append(f"{tp.get('start_date', '?')} to {tp.get('end_date', '?')}")
+    if filters.get("award_type_codes"):
+        bits.append("award types " + ",".join(filters["award_type_codes"]))
+    if filters.get("keywords"):
+        bits.append("keywords " + ", ".join(filters["keywords"][:3]))
+    if sort:
+        bits.append(f"sorted by {sort} desc")
+    return "; ".join(bits)
+
+
 class USAspendingClient:
     def __init__(
         self,
@@ -105,6 +126,7 @@ class USAspendingClient:
         return self.store.register(
             "```json\n" + json.dumps(payload, indent=1)[:200_000] + "\n```",
             type="api:usaspending",
+            published_date=self.store.as_of,
             publisher="USAspending.gov",
             title=title,
             url=url,
@@ -157,12 +179,27 @@ class USAspendingClient:
         if self.runlog:
             self.runlog.query("usaspending_spending_by_award", json.dumps(filters))
         resp = self._post("/search/spending_by_award/", body)
+        results = resp.get("results") or []
+        # a reproducible citation: the award page when the pull returned one award, else
+        # the API request (endpoint URL, the filter summarised in the title and the full
+        # body in meta) rather than the interactive search page
+        single = results[0].get("generated_internal_id") if len(results) == 1 else None
+        if single:
+            url = f"https://www.usaspending.gov/award/{single}"
+        else:
+            url = f"{API}/search/spending_by_award/"
         rec = self._register(
-            f"USAspending prime awards FY{fy_from}-FY{fy_to} for {', '.join(uei_or_names)} (page {page})",
-            "https://www.usaspending.gov/search",
+            f"USAspending prime awards FY{fy_from}-FY{fy_to} for {', '.join(uei_or_names)} "
+            f"(page {page}; {request_summary(filters, sort, page)})",
+            url,
             resp,
-            gov_id=None,
-            meta={"fy_from": fy_from, "fy_to": fy_to, "page": page},
+            gov_id=single,
+            meta={
+                "fy_from": fy_from,
+                "fy_to": fy_to,
+                "page": page,
+                "request": {"method": "POST", "path": "/search/spending_by_award/", "body": body},
+            },
         )
         resp["source_id"] = rec.source_id if rec else None
         return resp
@@ -197,11 +234,19 @@ class USAspendingClient:
         }
         resp = self._post(f"/search/spending_by_category/{category}/", body)
         rec = self._register(
-            f"USAspending spending by {category} FY{fy_from}-FY{fy_to} for {', '.join(uei_or_names)}",
-            "https://www.usaspending.gov/search",
+            f"USAspending spending by {category} FY{fy_from}-FY{fy_to} for {', '.join(uei_or_names)} "
+            f"({request_summary(body['filters'])})",
+            f"{API}/search/spending_by_category/{category}/",
             resp,
             gov_id=None,
-            meta={"category": category},
+            meta={
+                "category": category,
+                "request": {
+                    "method": "POST",
+                    "path": f"/search/spending_by_category/{category}/",
+                    "body": body,
+                },
+            },
         )
         resp["source_id"] = rec.source_id if rec else None
         return resp

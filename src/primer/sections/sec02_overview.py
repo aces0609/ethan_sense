@@ -4,8 +4,10 @@ plan    -> the foundation 10-K Item 1, the segment table, the entity record and 
            ownership table, then the three template web queries
 collect -> web research within the section budget (the structured sources are already in
            the store from the foundation pack)
-draft   -> segment revenue exhibit (3 FY, every cell cited), employee-count claim, the
-           listing/ownership caveat the examples open with, narrative (LLM or template)
+draft   -> segment revenue exhibit (3 FY, every cell cited), employee-count claim from the
+           Item 1 Human Capital passage, the customer split (US-government and international
+           shares) from the customer / concentration passage, the listing/ownership caveat
+           the examples open with, narrative (LLM or template)
 """
 
 from __future__ import annotations
@@ -21,11 +23,6 @@ from primer.state import Brief, SectionDraft
 
 SECTION = 2
 
-EMPLOYEES_RE = re.compile(
-    r"(?:approximately|about|roughly|had|employed)\s+([\d,]{4,})\s+(?:full[- ]time\s+)?"
-    r"(?:employees|people|team members)",
-    re.I,
-)
 HQ_RES = [
     re.compile(
         r"(?:corporate\s+)?headquarter(?:s|ed)\s+(?:is|are)?\s*(?:located\s+)?(?:in|at)\s+"
@@ -48,13 +45,11 @@ PCT_CELL = re.compile(r"^\d{1,2}(?:\.\d+)?\s?%$")
 
 
 def employee_count(text: str) -> int | None:
-    m = EMPLOYEES_RE.search(text)
-    if not m:
-        return None
-    try:
-        return int(m.group(1).replace(",", ""))
-    except ValueError:
-        return None
+    """Company-wide employee count from the Human Capital passage of Item 1 (the sentence
+    naming employees with the largest number, 'approximately N employees' preferred, union
+    sentences excluded); see `text_tools.employee_count`."""
+    found = tt.employee_count(text)
+    return found[0] if found else None
 
 
 def headquarters(text: str) -> str | None:
@@ -159,7 +154,9 @@ def draft(
     ex = segment_revenue_exhibit(ctx, SECTION)
     notes = list(tool_results.get("notes") or []) + list(ex.notes)
 
-    emp = employee_count(item1 or k_text) or employee_count(k_text)
+    emp = employee_count(item1) if item1 else None
+    if emp is None:
+        emp = employee_count(k_text)
     hq = headquarters(k_text)
     def14a = ctx.foundation_sources("DEF 14A")
     holders = ownership_rows(ctx.store.text(def14a[0])) if def14a else []
@@ -167,15 +164,43 @@ def draft(
 
     claims = list(ex.claims)
     emp_claim = common.claim(
-        SECTION, "employee_count", emp, f"FY{ctx.fy}", [k_sid], unit="count", concept="10-K Item 1"
+        SECTION,
+        "employee_count",
+        emp,
+        f"FY{ctx.fy}",
+        [k_sid],
+        unit="count",
+        concept="10-K Item 1 (Human Capital)",
     )
     if emp_claim:
         claims.append(emp_claim)
+    split = tt.customer_split(k_text)
+    for key, metric in (
+        ("us_gov_pct", "us_government_revenue_pct"),
+        ("international_pct", "international_revenue_pct"),
+    ):
+        c = common.claim(
+            SECTION,
+            metric,
+            split.get(key),
+            f"FY{ctx.fy}",
+            [k_sid],
+            unit="pct",
+            concept=f"10-K {split.get('passage') or 'text'} (customer split)",
+            note=(split.get(key.replace("_pct", "_sentence")) or "")[:200] or None,
+        )
+        if c:
+            claims.append(c)
 
     caveat = _caveat(ctx, holders, def14a[0] if def14a else None, ex.present)
     lead = _lead_sentences(ctx, item1, k_sid, k_text, ex, emp, hq, holders, def14a)
     facts = [c.model_dump(mode="json") for c in claims] + [
         {"fact": "headquarters", "value": hq, "source_ids": [k_sid]},
+        {
+            "fact": "customer split (10-K customer / concentration passage)",
+            "value": {k: v for k, v in split.items() if v is not None},
+            "source_ids": [k_sid],
+        },
         {
             "fact": "largest holders (DEF 14A)",
             "value": holders,
@@ -288,6 +313,14 @@ def _lead_sentences(
         out.append(
             f"The company had approximately {emp:,} employees at fiscal year end FY{ctx.fy}{cite}"
         )
+    split = tt.customer_split(k_text)
+    bits = []
+    if split.get("us_gov_pct") is not None:
+        bits.append(f"{split['us_gov_pct']:.0f}% of sales from the U.S. Government")
+    if split.get("international_pct") is not None:
+        bits.append(f"{split['international_pct']:.0f}% from international customers")
+    if bits:
+        out.append(f"The 10-K's customer disclosure puts {' and '.join(bits)} in FY{ctx.fy}{cite}")
     e = ctx.entity
     if e.exchange and e.ticker and e.exchange.upper() in k_text.upper():
         out.append(f"The common stock is listed on {e.exchange} under the ticker {e.ticker}{cite}")

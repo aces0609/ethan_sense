@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from primer.clients.edgar import AnnualFinancials
+from primer.clients.edgar import AnnualFinancials, derived_note, formula_operands
 from primer.config import concepts_config
 from primer.sections.style import fmt_money, fmt_pct
 from primer.state import Claim
@@ -72,11 +72,12 @@ def financial_tables(
             return fmt_money(fv.value, unit) + cite
         dv = fin.derived.get(metric, {}).get(fy)
         if dv is not None:
-            # derived: cite the sources of the operands
+            # derived: cite the sources of the operands (through one level of derivation, so
+            # net debt cites the debt and cash filings even though total debt is itself derived)
             sids = sorted(
                 {
                     accession_source_ids[fin.facts[m][fy].accession]
-                    for m in _operands(spec.get("derive", ""))
+                    for m in _operand_facts(cfg, spec.get("derive", ""))
                     if fy in fin.facts.get(m, {})
                     and fin.facts[m][fy].accession in accession_source_ids
                 }
@@ -91,7 +92,7 @@ def financial_tables(
                     period=f"FY{fy}",
                     source_ids=sids,
                     concept="derived",
-                    note=spec.get("derive"),
+                    note=derived_note(spec, lambda m, fy=fy: fin.value(m, fy)),
                 )
             )
             return fmt_money(dv, unit) + "".join(f" [{s}]" for s in sids)
@@ -172,10 +173,18 @@ def financial_tables(
     return ExhibitResult("\n\n".join(parts), claims, sorted(used), bool(parts), notes)
 
 
-def _operands(formula: str) -> list[str]:
-    import re
-
-    return re.findall(r"[a-z_]+", formula)
+def _operand_facts(cfg: dict, formula: str) -> list[str]:
+    """Reported metrics a formula rests on, expanding derived operands one level
+    (total_debt -> long_term_debt + short_term_debt)."""
+    specs = {m: s for stmt in cfg["statements"].values() for m, s in stmt.items()}
+    out: list[str] = []
+    for op in formula_operands(formula):
+        sub = (specs.get(op) or {}).get("derive")
+        if sub and not (specs.get(op) or {}).get("concepts"):
+            out.extend(formula_operands(sub))
+        else:
+            out.append(op)
+    return list(dict.fromkeys(out))
 
 
 # ---- per-section builders (PLAN 2.5), resolved lazily so sections.exhibits is the one

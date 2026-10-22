@@ -1,8 +1,11 @@
 """Section 12 exhibits: bull vs bear table and the unanswered-questions list (requirements §6 row 12).
 
 Sourced points only. Analyst questions are parsed from earnings-call transcripts (the
-operator line names the analyst and firm, or the speaker header carries the firm);
-rating changes come from the market-data adapter (MarketBeat page) and from news pages
+operator line names the analyst and firm, or the speaker header carries the firm), and
+the management answer that follows each question in the same transcript (the next
+speaker turn(s) by a company officer, up to ~120 words) is kept with it, cited to the
+same transcript source id; the officer is named as the transcript names them.
+Rating changes come from the market-data adapter (MarketBeat page) and from news pages
 whose own text names the firm. A firm is attributed only when the cited source's text
 names it (`names_firm`), which is what `validate/rules.py: check_attribution` enforces.
 Company-stated outlook and risk sentences from the 10-K fill the table as labelled rows.
@@ -81,6 +84,8 @@ NOT_FIRM_FIRST = {
     "An",
 }
 TARGET_IN_TEXT = re.compile(r"(?:price )?target (?:price )?(?:to|of|at) \$([\d,]+(?:\.\d+)?)", re.I)
+ANSWER_WORDS = 90  # cap on the management answer kept with a question (page budget, review fix 7)
+TITLE_WORDS = ("officer", "president", "chairman", "treasurer", "ceo", "cfo", "coo", "head of")
 
 
 @dataclass
@@ -91,6 +96,8 @@ class Debate:
     quarter: str
     source_id: str
     lean: str  # bull | bear | open
+    answer: str | None = None  # management's answer from the same transcript, trimmed
+    answered_by: str | None = None  # officer name(s) as the transcript names them
 
 
 @dataclass
@@ -168,13 +175,95 @@ def _lean(q: str) -> str:
     return "open"
 
 
-def parse_qa(md: str, quarter: str, source_id: str, max_questions: int = 8) -> list[Debate]:
-    """One debate per analyst: the first substantive sentence of their first question."""
+def _firm_for(speaker: str, role: str, firm_of: dict[str, str]) -> str | None:
+    """The analyst's firm from the operator introductions or the speaker header, else None
+    (an officer, the operator or an unintroduced speaker)."""
+    if "analyst" in role.lower():
+        return role.split("--")[0].split("—")[0].strip() or None
+    key = speaker.lower()
+    if key in firm_of:
+        return firm_of[key]
+    last = key.split()[-1] if key.split() else ""
+    return next((f for k, f in firm_of.items() if last and k.split()[-1] == last), None)
+
+
+def _trim_words(text: str, max_words: int = ANSWER_WORDS) -> str:
+    """Whole sentences up to max_words; a first sentence longer than that is cut with an ellipsis."""
+    words = " ".join(text.split())
+    if len(words.split()) <= max_words:
+        return words
+    kept: list[str] = []
+    n = 0
+    for s in sentences(words):
+        k = len(s.split())
+        if kept and n + k > max_words:
+            break
+        if not kept and k > max_words:
+            return " ".join(s.split()[:max_words]).rstrip(",;:") + "…"
+        kept.append(s)
+        n += k
+    return " ".join(kept)
+
+
+def _officer_title(name: str, intro: str) -> str | None:
+    """The title the transcript's opening gives an officer ("Evan Scott, our Chief Financial
+    Officer" -> "Chief Financial Officer"), matched on the surname so a nickname in the
+    introduction (Jim / James) still resolves; None when the opening does not give one."""
+    parts = name.split()
+    if not parts or not intro:
+        return None
+    last = re.escape(parts[-1])
+    m = re.search(rf"\b[A-Z][a-z]+ {last},?\s+(?:our |the |as )?([^.;]{{3,120}})", intro)
+    if not m:
+        return None
+    title = m.group(1).split(", and ")[0].strip(" ,")
+    if len(title) > 70 or not any(w in title.lower() for w in TITLE_WORDS):
+        return None
+    return title
+
+
+def _answer_after(
+    blocks: list[tuple[str, str, str]],
+    start: int,
+    asker: str,
+    firm_of: dict[str, str],
+    intro: str,
+) -> tuple[str | None, str | None]:
+    """Management's answer to the question in blocks[start]: the following speaker turn(s)
+    that are not the operator, the asker or another analyst, up to ANSWER_WORDS words."""
+    texts: list[str] = []
+    names: list[str] = []
+    n = 0
+    for speaker, role, text in blocks[start + 1 :]:
+        if speaker.lower().startswith("operator") or speaker.lower() == asker.lower():
+            break
+        if _firm_for(speaker, role, firm_of):
+            break
+        if not text.strip():
+            continue
+        title = role.strip() if role and "analyst" not in role.lower() else None
+        title = title or _officer_title(speaker, intro)
+        label = f"{speaker} ({title})" if title else speaker
+        if label not in names:
+            names.append(label)
+        texts.append(text.strip())
+        n += len(text.split())
+        if n >= ANSWER_WORDS:
+            break
+    if not texts:
+        return None, None
+    return _trim_words(" ".join(texts)), " and ".join(names)
+
+
+def parse_qa(md: str, quarter: str, source_id: str, max_questions: int = 6) -> list[Debate]:
+    """One debate per analyst: the first substantive sentence of their first question, with
+    the management answer that follows it in the same transcript when one does."""
     blocks = _blocks(md)
     firm_of: dict[str, str] = {}
     out: list[Debate] = []
     asked: set[str] = set()
-    for speaker, role, text in blocks:
+    intro_parts: list[str] = []
+    for i, (speaker, role, text) in enumerate(blocks):
         if speaker.lower().startswith("operator"):
             for m in OPERATOR_INTRO.finditer(text):
                 firm_of[m.group(1).strip().lower()] = m.group(2).strip()
@@ -182,16 +271,21 @@ def parse_qa(md: str, quarter: str, source_id: str, max_questions: int = 8) -> l
         if "analyst" in role.lower():
             firm_of[speaker.lower()] = role.split("--")[0].split("—")[0].strip()
         key = speaker.lower()
-        firm = firm_of.get(key)
+        firm = _firm_for(speaker, role, firm_of)
         if not firm:
-            last = key.split()[-1] if key.split() else ""
-            firm = next((f for k, f in firm_of.items() if last and k.split()[-1] == last), None)
-        if not firm or key in asked:
+            if not out:
+                intro_parts.append(text)  # prepared remarks name the officers and titles
+            continue
+        if key in asked:
             continue
         q = _first_question(text)
         if not q:
             continue
         asked.add(key)
+        answer, who = _answer_after(blocks, i, speaker, firm_of, " ".join(intro_parts))
+        lean = _lean(q)
+        if lean == "open" and answer:
+            lean = _lean(answer)
         out.append(
             Debate(
                 firm=firm,
@@ -199,7 +293,9 @@ def parse_qa(md: str, quarter: str, source_id: str, max_questions: int = 8) -> l
                 question=q,
                 quarter=quarter,
                 source_id=source_id,
-                lean=_lean(q),
+                lean=lean,
+                answer=answer,
+                answered_by=who,
             )
         )
         if len(out) >= max_questions:
@@ -211,15 +307,17 @@ def parse_qa(md: str, quarter: str, source_id: str, max_questions: int = 8) -> l
 
 
 def classify_rating(action: str, rating: str | None) -> str:
+    """The rating decides the column when it is directional (a Sell with a raised target is
+    still a bear point); the action decides only for neutral ratings or no rating."""
     a = (action or "").lower()
+    r = (rating or "").lower()
+    if any(k in r for k in ("sell", "underweight", "underperform", "negative", "reduce")):
+        return "bear"
+    if any(k in r for k in ("buy", "overweight", "outperform", "positive", "accumulate")):
+        return "bull"
     if any(k in a for k in ("upgrad", "boost", "raise", "increase")):
         return "bull"
     if any(k in a for k in ("downgrad", "lower", "cut", "reduce", "decrease")):
-        return "bear"
-    r = (rating or "").lower()
-    if any(k in r for k in ("buy", "overweight", "outperform", "positive", "accumulate")):
-        return "bull"
-    if any(k in r for k in ("sell", "underweight", "underperform", "negative", "reduce")):
         return "bear"
     return "open"
 
@@ -348,6 +446,17 @@ def company_points(item7: str, sid7: str | None, item1a: str, sid1a: str | None)
 # ---- exhibit --------------------------------------------------------------------------------
 
 
+def answer_text(d: Debate) -> str:
+    """'What management said (officer as the transcript names them): answer' for a debate."""
+    who = d.answered_by or "management"
+    return f"What management said ({who}): {d.answer}"
+
+
+def answer_line(d: Debate) -> str:
+    """The answer appended to a question cell, or '' when the transcript carries none."""
+    return f" — {answer_text(d)}" if d.answer else ""
+
+
 def thesis_exhibit(
     *,
     debates: list[Debate],
@@ -365,7 +474,7 @@ def thesis_exhibit(
             points.append(
                 Point(
                     d.lean,
-                    f"{d.firm} asked ({d.quarter} call): {d.question}",
+                    f"{d.firm} asked ({d.quarter} call): {d.question}" + answer_line(d),
                     d.source_id,
                     d.firm,
                     "question",
@@ -390,7 +499,11 @@ def thesis_exhibit(
         picked.append(d)
         if len(picked) >= 8:
             break
-    qlines = [f"- {d.firm} ({d.quarter} call): {d.question} [{d.source_id}]" for d in picked]
+    qlines: list[str] = []
+    for d in picked:
+        qlines.append(f"- {d.firm} ({d.quarter} call): {d.question} [{d.source_id}]")
+        if d.answer:
+            qlines.append(f"  - {answer_text(d)} [{d.source_id}]")
     questions_md = (
         "\n".join(qlines)
         if qlines

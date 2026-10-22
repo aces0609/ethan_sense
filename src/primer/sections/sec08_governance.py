@@ -12,7 +12,6 @@ draft  -> officer table and ownership-concentration bullets (deterministic), gov
 from __future__ import annotations
 
 import json
-import re
 from datetime import timedelta
 from typing import Any
 
@@ -36,7 +35,7 @@ from primer.sections.exhibits_sec08 import (
     officer_rows,
     ownership_rows,
 )
-from primer.sections.text_tools import exec_officer_rows, paragraphs_with
+from primer.sections.text_tools import exec_officer_rows, exec_officer_section, paragraphs_with
 from primer.state import Brief, SectionDraft
 
 
@@ -190,27 +189,21 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
     proxies = ctx.foundation_sources("DEF 14A")
     if proxies:
         out["proxy_sid"] = proxies[0]
+    # the officer list comes from a named 10-K section: Part I "Information about our
+    # Executive Officers" or Item 10 (whichever heading is followed by officer rows), and
+    # the proxy only as the fallback in `officer_rows`
     item10, sid10 = ctx.item_text("10")
-    if sid10 and len(exec_officer_rows(item10)) < 3:
-        # many 10-Ks incorporate Item 10 by reference and list officers in Part I
-        whole = ctx.store.text(sid10)
-        marks = [
-            m.start()
-            for m in re.finditer(
-                r"Information about our Executive Officers|Executive Officers of the Registrant|Information About Our Executive Officers",
-                whole,
-            )
-        ]
-        if marks:
-            item10 = whole[marks[-1] : marks[-1] + 15000]
-            out["notes"].append("officer list taken from the 10-K Part I executive-officer section")
-    if not sid10:
-        tenks = ctx.foundation_sources("10-K")
-        if tenks:
-            sid10, item10 = tenks[0], ctx.store.text(tenks[0])
-            out["notes"].append(
-                "10-K Item 10 heading not found; officer table searched in the whole 10-K"
-            )
+    tenks = ctx.foundation_sources("10-K")
+    whole = ctx.store.text(tenks[0]) if tenks else ""
+    found = exec_officer_section(whole) if whole else None
+    if found and (not sid10 or len(exec_officer_rows(item10)) < 3):
+        item10, sid10 = found[0], tenks[0]
+        out["notes"].append(f"officer list taken from the 10-K '{found[1]}' section")
+    elif not sid10 and tenks:
+        sid10, item10 = tenks[0], whole
+        out["notes"].append(
+            "10-K executive-officer heading not found; officer table searched in the whole 10-K"
+        )
     out["tenk_sid"], out["tenk_text"] = sid10, item10
     out["ownership_filings"] = _ownership_filings(ctx)
     queries = [i["query"] for i in plan_items if i.get("tool") == "firecrawl.search"]

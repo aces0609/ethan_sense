@@ -5,9 +5,11 @@ plan   -> earnings-call transcripts from the foundation pack (Q&A), rating chang
 collect-> parses nothing yet: records the transcript ids, pulls the adapter rows (the
           MarketBeat/TipRanks pages are scraped once per run by the adapter), runs web
           research within budget
-draft  -> bull vs bear table and unanswered-questions list; every firm attribution is
-          backed by a cited source whose text names the firm; claims for rating counts
-          and price targets; narrative (model when configured, else the template digest)
+draft  -> bull vs bear table and the analyst-questions list, each question paired with
+          the management answer that follows it in the same transcript (review 2026-10-21
+          §9 fix 7); every firm attribution is backed by a cited source whose text names
+          the firm; claims for rating counts and price targets; narrative (model when
+          configured, else the template digest)
 """
 
 from __future__ import annotations
@@ -187,17 +189,25 @@ def draft(
         )
     if res.get("transcripts") and not debates:
         notes.append("transcript found but no analyst question with a named firm could be parsed")
+    answered = [d for d in debates if d.answer]
+    if debates and not answered:
+        notes.append(
+            "analyst questions parsed but no management answer followed them in the transcript"
+        )
     coverage = "full" if (debates and ex.present) else "partial"
     firms_bound = sorted({d.firm for d in debates} | set(res.get("coverage_firms") or []))
 
     caveat = caveat_line(
         "No sell-side research or expert-call transcripts were available; firm names appear only where a "
         "cited transcript or page names the firm, rating actions are as listed on the aggregator page on "
-        "the date shown, and analyst questions are quoted as asked, not as views"
+        "the date shown, analyst questions are quoted as asked, not as views, and management answers are "
+        "the company's statements on the same call, quoted from the same transcript"
     )
     leads: list[str] = []
     for d in debates[:4]:
         leads.append(f'On the {d.quarter} call, {d.firm} asked: "{d.question}" [{d.source_id}].')
+        if d.answer:
+            leads.append(f'{d.answered_by or "Management"} replied: "{d.answer}" [{d.source_id}].')
     if rating_sid and res.get("market"):
         named = [p for p in rating if p.kind == "rating"]
         s = f"The MarketBeat ratings page lists {len(changes)} rating actions in the trailing 12 months"
@@ -213,20 +223,40 @@ def draft(
         ctx,
         brief,
         evidence_sids=evidence,
-        facts=[c.model_dump() for c in ex.claims] + [{"firms_named_in_sources": firms_bound}],
+        facts=[c.model_dump() for c in ex.claims]
+        + [{"firms_named_in_sources": firms_bound}]
+        + [
+            {
+                "management_answers": [
+                    {
+                        "firm": d.firm,
+                        "call": d.quarter,
+                        "question": d.question,
+                        "answered_by": d.answered_by,
+                        "answer": d.answer,
+                        "source_id": d.source_id,
+                    }
+                    for d in answered
+                ]
+            }
+        ],
         exhibit_md=ex.markdown + "\n\n" + ex.questions_md,
         extra_rules=(
             "Attribute a view to a firm only when the cited source names that firm (the list "
             "firms_named_in_sources is the bound). Analyst questions are debates, not views; say who asked. "
-            "Never invent a broker rating or target."
+            "management_answers are the company's own statements from the same transcript: use them to "
+            "weigh each bull and bear point, name the officer as the transcript names them, and never "
+            "present an answer as a broker view. Never invent a broker rating or target."
         ),
         critic_notes=critic_notes,
-        keywords=["question", "upgrade", "downgrade", "target", "bull", "bear"],
+        keywords=["question", "answer", "upgrade", "downgrade", "target", "bull", "bear"],
     )
     if narrative is None:
         narrative = template_digest(ctx, evidence, leads)
     exhibit_md = (
-        ex.markdown + "\n\n**Unanswered questions (as asked on the calls)**\n\n" + ex.questions_md
+        ex.markdown
+        + "\n\n**Analyst questions and what management said (as asked and answered on the calls)**\n\n"
+        + ex.questions_md
     )
     return finalize_draft(
         brief,

@@ -32,7 +32,13 @@ import httpx
 from primer.clients.cache import CacheMiss, DiskCache
 from primer.clients.ratelimit import TokenBucket
 from primer.config import budgets_config, domain_policy, output_root, tier_for_url
-from primer.evidence.store import EvidenceStore
+from primer.evidence.store import (
+    EvidenceStore,
+    clean_title,
+    date_from_metadata,
+    date_from_url,
+    is_index_page,
+)
 from primer.runlog import RunLog
 from primer.state import SourceRecord
 
@@ -187,19 +193,15 @@ class FirecrawlClient:
         policy = domain_policy(url)
         if policy == "deny":
             return None
-        title = metadata.get("title") or metadata.get("ogTitle") or url
+        if is_index_page(url, markdown):
+            # a newsroom / presentations / investors listing is navigation, not evidence:
+            # the pages it links to are the sources (review 2026-10-21 §7)
+            if self.runlog:
+                self.runlog.count("firecrawl_index_pages_refused")
+            return None
+        title = clean_title(metadata.get("title") or metadata.get("ogTitle") or url)
         publisher = metadata.get("ogSiteName") or urlparse(url).netloc
-        pub = (
-            metadata.get("publishedTime")
-            or metadata.get("article:published_time")
-            or metadata.get("datePublished")
-        )
-        published = published_date
-        if published is None and pub:
-            try:
-                published = date.fromisoformat(str(pub)[:10])
-            except ValueError:
-                published = None
+        published = published_date or date_from_metadata(metadata) or date_from_url(url)
         access = "limited" if policy == "limited" else "full"
         content = (
             markdown
@@ -219,6 +221,17 @@ class FirecrawlClient:
                 "firecrawl": True,
                 "section_hint": section_hint,
                 "status": metadata.get("statusCode"),
+                # page dates the fetcher saw, so the store can fill a missing published_date
+                **{
+                    k: str(metadata[k])[:40]
+                    for k in (
+                        "publishedTime",
+                        "article:published_time",
+                        "datePublished",
+                        "modifiedTime",
+                    )
+                    if metadata.get(k)
+                },
             },
         )
 

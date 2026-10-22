@@ -1,7 +1,15 @@
 """Main primer graph (requirements §5 nodes 1-11).
 
 intake → resolve_entity → foundation_pack → plan_sections → [Send per section] section_researcher
-→ key_takeaways → assemble → validate → (retry failing sections, max 2) → review → export
+→ propagate_recent → [Send sections 3, 6, 8, 10, 12 with section 14's events] section_researcher
+→ reconcile → key_takeaways → assemble → validate → (retry failing sections, max 2) → review → export
+
+The fan-out runs in two waves (review 2026-10-21 §9 item 5): section 14 (Recent
+Developments) and every section that does not read it go first, in parallel; the sections
+that must know the dated events inside the window (3, 6, 8, 10, 12) go second with those
+events in their payload. `reconcile` (§9 item 1) then replaces "not in the evidence"
+sentences with cross-references to the section that has the fact and raises conflict
+lines where sections disagree.
 
 A SQLite checkpointer in the run folder makes a killed run resume at the failed node.
 """
@@ -26,6 +34,7 @@ from primer.clients.edgar import EdgarClient
 from primer.config import llm_available, output_root, role_model, trade_press
 from primer.evidence.store import EvidenceStore
 from primer.graph.foundation import build_foundation
+from primer.graph.reconcile import reconcile_drafts
 from primer.graph.researcher import build_researcher
 from primer.llm import invoke_structured, invoke_text
 from primer.render.mdx import render
@@ -248,24 +257,110 @@ def plan_sections(state: PrimerState) -> dict[str, Any]:
     return {"plan": plan, "retries": {s: 0 for s in researched}}
 
 
+# sections that read section 14's dated events and therefore run in the second wave
+LATE_SECTIONS: tuple[int, ...] = (3, 6, 8, 10, 12)
+EVENT_ROW = re.compile(r"^\|\s*(?P<date>20\d{2}-\d{2}-\d{2})")
+
+
+def _send(state: PrimerState, brief: dict[str, Any], critic_notes: list[str] | None = None) -> Send:
+    return Send(
+        "section_researcher",
+        {
+            "run_dir": state["run_dir"],
+            "as_of": state["as_of"],
+            "entity": state["entity"],
+            "foundation": state.get("foundation", {}),
+            "brief": brief,
+            "iteration": 0,
+            "critic_notes": list(critic_notes or []),
+            "recent_events": list(state.get("recent_events") or []),
+        },
+    )
+
+
+def late_sections(plan: dict[Any, Any]) -> list[int]:
+    """The sections held back for the second wave: only when section 14 is in the plan."""
+    secs = {int(s) for s in plan}
+    if 14 not in secs:
+        return []
+    return [s for s in LATE_SECTIONS if s in secs]
+
+
 def fan_out(state: PrimerState) -> list[Send]:
-    sends = []
-    for brief in state.get("plan", {}).values():
-        sends.append(
-            Send(
-                "section_researcher",
-                {
-                    "run_dir": state["run_dir"],
-                    "as_of": state["as_of"],
-                    "entity": state["entity"],
-                    "foundation": state.get("foundation", {}),
-                    "brief": brief,
-                    "iteration": 0,
-                    "critic_notes": [],
-                },
-            )
+    plan = state.get("plan", {})
+    late = set(late_sections(plan))
+    return [_send(state, brief) for sec, brief in plan.items() if int(sec) not in late]
+
+
+def events_from_draft(markdown: str) -> list[dict[str, Any]]:
+    """Section 14's event log rows as {date, event, detail, source_id}, newest first."""
+    out: list[dict[str, Any]] = []
+    for line in markdown.splitlines():
+        m = EVENT_ROW.match(line)
+        if not m:
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        sids = re.findall(r"\[(src_\d{4})\]", line)
+        if not sids:
+            continue
+        strip = lambda s: re.sub(r"\s*\[src_\d{4}\]", "", s).strip()  # noqa: E731
+        out.append(
+            {
+                "date": m.group("date"),
+                "event": strip(cells[1])[:200],
+                "detail": strip(cells[3])[:300] if len(cells) > 3 else "",
+                "source_id": sids[-1],
+            }
         )
-    return sends
+    out.sort(key=lambda e: e["date"], reverse=True)
+    return out
+
+
+def propagate_recent(state: PrimerState) -> dict[str, Any]:
+    """Join after a researcher wave: lift section 14's dated events into state so the
+    second wave (and any retry) carries them."""
+    drafts = state.get("drafts", {}) or {}
+    d14 = drafts.get(14) or drafts.get("14")
+    events = events_from_draft(d14.get("markdown", "")) if d14 else []
+    wave = int(state.get("recent_wave", 0) or 0) + 1
+    runlog = get_runlog(state["run_dir"])
+    runlog.meta["recent_events"] = {"count": len(events), "wave": wave}
+    return {"recent_events": events, "recent_wave": wave}
+
+
+def _after_propagate(state: PrimerState):
+    """Second wave: the late sections not yet drafted, each with the events; otherwise on."""
+    plan = state.get("plan", {})
+    if int(state.get("recent_wave", 0) or 0) != 1:
+        return "reconcile"
+    drafted = {int(k) for k in (state.get("drafts", {}) or {})}
+    pending = [s for s in late_sections(plan) if s not in drafted]
+    if not pending:
+        return "reconcile"
+    briefs = {int(k): v for k, v in plan.items()}
+    return [_send(state, briefs[s]) for s in pending]
+
+
+def reconcile(state: PrimerState) -> dict[str, Any]:
+    """Cross-section reconciliation (review §9 item 1); every change is in run.json."""
+    runlog = get_runlog(state["run_dir"])
+    drafts = {int(k): v for k, v in (state.get("drafts", {}) or {}).items()}
+    if not drafts:
+        return {"reconciliation": {}}
+    store = EvidenceStore.for_run(state["run_dir"], as_of=date.fromisoformat(state["as_of"]))
+    with runlog.timed("reconcile"):
+        try:
+            changed, record = reconcile_drafts(drafts, list(state.get("claims", [])), store, runlog)
+        except Exception as e:  # noqa: BLE001 - reconciliation never fails the run
+            runlog.error(f"reconcile: {e!r}")
+            return {"reconciliation": {"error": repr(e)}}
+    runlog.write()
+    out: dict[str, Any] = {"reconciliation": record}
+    if changed:
+        out["drafts"] = changed
+    return out
 
 
 def section_researcher(payload: dict[str, Any]) -> dict[str, Any]:
@@ -460,20 +555,7 @@ def _after_validate(state: PrimerState):
     for sec, sec_notes in notes.items():
         if sec not in state.get("plan", {}) or retries.get(sec, 0) >= 2:
             continue
-        sends.append(
-            Send(
-                "section_researcher",
-                {
-                    "run_dir": state["run_dir"],
-                    "as_of": state["as_of"],
-                    "entity": state["entity"],
-                    "foundation": state.get("foundation", {}),
-                    "brief": state["plan"][sec],
-                    "iteration": 0,
-                    "critic_notes": sec_notes,
-                },
-            )
-        )
+        sends.append(_send(state, state["plan"][sec], sec_notes))
     if sends:
         return sends
     return "review"
@@ -531,6 +613,8 @@ def build_main(checkpointer=None):
     g.add_node("foundation_pack", foundation_pack)
     g.add_node("plan_sections", plan_sections)
     g.add_node("section_researcher", section_researcher)
+    g.add_node("propagate_recent", propagate_recent)
+    g.add_node("reconcile", reconcile)
     g.add_node("key_takeaways", key_takeaways)
     g.add_node("assemble", assemble)
     g.add_node("validate", validate)
@@ -543,7 +627,11 @@ def build_main(checkpointer=None):
     g.add_edge("resolve_entity", "foundation_pack")
     g.add_edge("foundation_pack", "plan_sections")
     g.add_conditional_edges("plan_sections", fan_out, ["section_researcher"])
-    g.add_edge("section_researcher", "key_takeaways")
+    g.add_edge("section_researcher", "propagate_recent")
+    g.add_conditional_edges(
+        "propagate_recent", _after_propagate, ["section_researcher", "reconcile"]
+    )
+    g.add_edge("reconcile", "key_takeaways")
     g.add_edge("key_takeaways", "assemble")
     g.add_edge("assemble", "validate")
     g.add_conditional_edges("validate", _route_validate, ["bump_retries", "review"])

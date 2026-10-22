@@ -34,8 +34,13 @@ from primer.evidence.chunking import Chunk, chunk_by_item
 from primer.evidence.store import EvidenceStore
 from primer.llm import invoke_text
 from primer.runlog import RunLog
-from primer.sections.style import CITATION_TOKEN, HOUSE_STYLE
-from primer.state import Brief, Claim, Entity, SectionDraft
+from primer.sections.style import (
+    CITATION_TOKEN,
+    HOUSE_STYLE,
+    PIPELINE_MOVE,
+    PIPELINE_REWRITES,
+)
+from primer.state import Brief, Claim, Entity, SectionDraft, SourceRecord
 
 PDF_RE = re.compile(r"\.pdf($|\?)", re.I)
 
@@ -107,6 +112,9 @@ class ToolContext:
     samgov: SamGovClient | None = None
     market: Any | None = None  # MarketDataAdapter, created lazily by graph.researcher
     brief: Brief | None = None
+    # section 14's dated events ({date, event, detail, source_id}) for the sections that
+    # run after it (3, 6, 8, 10, 12); empty for the first researcher wave
+    recent_events: list[dict[str, Any]] = field(default_factory=list)
     _chunks: dict[str, list[Chunk]] = field(default_factory=dict)
 
     # -- foundation handles ------------------------------------------------------------
@@ -169,6 +177,35 @@ class ToolContext:
         r = self.store.get(sid)
         d = r.published_date.isoformat() if r.published_date else "n.d."
         return f"{r.title} ({r.publisher}, {d})"
+
+
+# ---- recent events from section 14 (review §9 item 5) ---------------------------------------
+
+
+def recent_events(ctx: ToolContext, limit: int = 20) -> list[dict[str, Any]]:
+    """Section 14's dated events, newest first, whose sources exist in the store. Each is
+    {date, event, detail, source_id}; empty when this section ran in the first wave."""
+    out = []
+    for e in ctx.recent_events:
+        sid = e.get("source_id")
+        if not sid or not ctx.store.has(sid):
+            continue
+        out.append(e)
+    out.sort(key=lambda e: str(e.get("date", "")), reverse=True)
+    return out[:limit]
+
+
+def recent_events_block(ctx: ToolContext, limit: int = 12) -> str:
+    """Prompt block for the drafter: the dated events section 14 established, with their
+    source ids, so a later section does not call a settled fact pending or absent."""
+    evs = recent_events(ctx, limit)
+    if not evs:
+        return ""
+    lines = []
+    for e in evs:
+        detail = f" — {e['detail']}" if e.get("detail") else ""
+        lines.append(f"- {e['date']}: {e['event']}{detail} [{e['source_id']}]")
+    return "\n".join(lines)
 
 
 # ---- web research --------------------------------------------------------------------
@@ -357,6 +394,10 @@ def draft_section(
     allowed = [s for s in dict.fromkeys(evidence_sids) if ctx.store.has(s)]
     if not allowed and not facts:
         return None
+    events_block = recent_events_block(ctx)
+    if events_block:
+        # the drafter may cite section 14's sources for the events it is told about
+        allowed = list(dict.fromkeys([*allowed, *(e["source_id"] for e in recent_events(ctx))]))
     words = int(float(brief.pages) * 380)
     cut = any(
         ("page budget" in n.lower()) or n.lower().startswith("cut to") for n in (critic_notes or [])
@@ -370,7 +411,7 @@ def draft_section(
         f"Scope: {brief.scope}\nSub-questions: {'; '.join(brief.sub_questions)}\n"
         f"Required exhibit (already built, appended after your text, do not repeat it): {brief.required_exhibit}\n"
         f"Common failure to avoid: {brief.common_failure}\n"
-        f"Length: {'at most' if cut else 'about'} {words} words of prose in total; the page budget is "
+        f"Length: no more than {words} words of prose in total (a hard limit; stop when you reach it); the page budget is "
         f"{brief.pages} pages and the exhibit counts against it. Structure: one italic caveat line starting "
         f"'*Caveat:' then 2-4 short '###' subsections of declarative sentences, then a '### Perspectives' list "
         f"of at most 6 bullets where each bullet names the publisher or firm the view comes from (only if a "
@@ -391,6 +432,14 @@ def draft_section(
         + (
             f"\nExhibit that will follow your text (for context):\n{exhibit_md[:4000]}\n"
             if exhibit_md
+            else ""
+        )
+        + (
+            "\nDated events already established in section 14 (Recent Developments), all inside "
+            "the trailing 12 months. Treat them as settled facts: cite their source ids where "
+            "relevant and never describe one as pending, absent, unconfirmed or scheduled when "
+            "it has happened:\n" + events_block + "\n"
+            if events_block
             else ""
         )
         + "\nEvidence:\n"
@@ -424,6 +473,152 @@ def template_digest(
         for sid in sids[:max_items]:
             lines.append(f"- {ctx.source_line(sid)} [{sid}]")
     return "\n".join(lines).strip()
+
+
+# ---- prose hygiene (review §9 item 8) ---------------------------------------------------
+
+SENTENCE_SPLIT = re.compile(r"(?<=[.!?])(?:\s*\[src_\d{4}\])*\s+(?=[A-Z0-9(\"'“])")
+PERSPECTIVES_HEADING = re.compile(r"^#{2,5}\s*\**Perspectives\**\s*:?\s*$", re.I)
+FIRST_PARTY_TYPES = {
+    "earnings_call",
+    "transcript",
+    "api:edgar_xbrl",
+    "api:edgar_submissions",
+    "ir_map",
+}
+SUFFIX_RE = re.compile(
+    r"\b(corp|corporation|inc|incorporated|co|company|ltd|plc|holdings?|group|llc|lp|se|ag|nv|sa|the)\b\.?",
+    re.I,
+)
+
+
+def _case_preserving(repl):
+    """Wrap a rewrite so a match that began a sentence keeps its capital letter."""
+
+    def fn(m: re.Match[str]) -> str:
+        out = repl(m) if callable(repl) else repl
+        if m.group(0)[:1].isupper() and out[:1].islower():
+            out = out[0].upper() + out[1:]
+        return out
+
+    return fn
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Sentences of one prose line; each keeps the citation tokens that follow its period."""
+    parts: list[str] = []
+    last = 0
+    for m in SENTENCE_SPLIT.finditer(text):
+        parts.append(text[last : m.end()].strip())
+        last = m.end()
+    tail = text[last:].strip()
+    if tail:
+        parts.append(tail)
+    return [p for p in parts if p]
+
+
+def scrub_pipeline_vocabulary(text: str) -> tuple[str, list[str]]:
+    """Deterministic post-check: pipeline vocabulary never reaches prose.
+
+    Sentences about caps, budgets and dropped queries are removed from the prose and
+    returned (the caller puts them in the coverage line); the remaining pipeline words are
+    rewritten to reader language. Table rows, blockquotes and headings are left alone."""
+    moved: list[str] = []
+    out_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith(("|", ">", "#")):
+            out_lines.append(line)
+            continue
+        indent = line[: len(line) - len(stripped)]
+        bullet = ""
+        m = re.match(r"([-*]\s+|\d+\.\s+)", stripped)
+        if m:
+            bullet = m.group(1)
+            stripped = stripped[m.end() :]
+        kept: list[str] = []
+        for s in _split_sentences(stripped):
+            if PIPELINE_MOVE.search(s):
+                moved.append(re.sub(CITATION_TOKEN, "", s).strip().rstrip("."))
+                continue
+            for rx, repl in PIPELINE_REWRITES:
+                s = rx.sub(_case_preserving(repl), s)
+            kept.append(s)
+        if not kept:
+            continue  # a line that was only research notes disappears
+        out_lines.append(indent + bullet + " ".join(kept))
+    # collapse blank runs left by removed lines
+    cleaned: list[str] = []
+    for ln in out_lines:
+        if not ln.strip() and cleaned and not cleaned[-1].strip():
+            continue
+        cleaned.append(ln)
+    return "\n".join(cleaned).strip(), moved
+
+
+def _norm_name(s: str) -> str:
+    s = SUFFIX_RE.sub(" ", s.lower())
+    return re.sub(r"[^a-z0-9]+", "", s)
+
+
+def _company_domains(ctx: ToolContext) -> set[str]:
+    doms: set[str] = set()
+    site = ((ctx.foundation.get("ir") or {}).get("site") or "") if ctx.foundation else ""
+    for raw in (site,):
+        if not raw:
+            continue
+        host = re.sub(r"^https?://", "", raw).split("/")[0].lower()
+        labels = host.split(".")
+        if len(labels) >= 2:
+            doms.add(".".join(labels[-2:]))
+    return doms
+
+
+def is_first_party_source(rec: SourceRecord, ctx: ToolContext) -> bool:
+    """True for the company's own documents (filings, releases, transcripts, its own site)
+    and for Wikipedia: neither is a second-party perspective."""
+    url = (rec.url or "").lower()
+    pub = rec.publisher or ""
+    if "wikipedia.org" in url or "wikipedia" in pub.lower():
+        return True
+    if rec.type in FIRST_PARTY_TYPES:
+        return True
+    names = {_norm_name(ctx.entity.name), *(_norm_name(a) for a in ctx.entity.aliases)}
+    names = {n for n in names if len(n) >= 4}
+    npub = _norm_name(pub)
+    if npub and any(n == npub or n in npub or (len(npub) >= 6 and npub in n) for n in names):
+        return True
+    if ctx.entity.cik and "sec.gov" in url:
+        cik = str(int(ctx.entity.cik)) if ctx.entity.cik.isdigit() else ctx.entity.cik
+        if re.search(rf"/data/0*{re.escape(cik)}/", url):
+            return True
+    host = re.sub(r"^https?://", "", url).split("/")[0]
+    if any(host == d or host.endswith("." + d) for d in _company_domains(ctx)):
+        return True
+    return False
+
+
+def drop_first_party_perspectives(narrative: str, ctx: ToolContext) -> tuple[str, bool]:
+    """Remove the '### Perspectives' block when no bullet cites a second-party source
+    (only the company's own documents or Wikipedia). Returns (narrative, dropped)."""
+    lines = narrative.splitlines()
+    start = next((i for i, ln in enumerate(lines) if PERSPECTIVES_HEADING.match(ln.strip())), None)
+    if start is None:
+        return narrative, False
+    end = start + 1
+    while end < len(lines) and not lines[end].lstrip().startswith("#"):
+        end += 1
+    block = "\n".join(lines[start:end])
+    sids = set(re.findall(CITATION_TOKEN, block))
+    second_party = any(
+        ctx.store.has(s) and not is_first_party_source(ctx.store.get(s), ctx) for s in sids
+    )
+    if second_party:
+        return narrative, False
+    kept = lines[:start] + lines[end:]
+    text = "\n".join(kept)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text, True
 
 
 # ---- draft assembly -------------------------------------------------------------------
@@ -486,12 +681,28 @@ def finalize_draft(
     notes: list[str] | None = None,
     exhibit_title: str | None = None,
 ) -> SectionDraft:
-    """Assemble caveat + narrative + exhibit + coverage line into a SectionDraft."""
+    """Assemble caveat + narrative + exhibit + coverage line into a SectionDraft.
+
+    Prose hygiene (review §9 item 8) is applied here so every handler gets it: pipeline
+    vocabulary is rewritten to reader language, research-limit sentences move into the
+    coverage line, and a Perspectives block with no second-party source is dropped."""
     parts: list[str] = []
+    hygiene_notes: list[str] = []
     if caveat and narrative and narrative.lstrip().startswith("*Caveat"):
         # the drafter wrote its own caveat line; the handler's deterministic one wins
         first, _, rest = narrative.lstrip().partition("\n")
         narrative = rest.strip()
+    if caveat:
+        caveat, moved = scrub_pipeline_vocabulary(caveat)
+        hygiene_notes.extend(moved)
+    if narrative:
+        narrative, moved = scrub_pipeline_vocabulary(narrative)
+        hygiene_notes.extend(moved)
+        narrative, dropped_persp = drop_first_party_perspectives(narrative, ctx)
+        if dropped_persp:
+            hygiene_notes.append(
+                "Perspectives omitted: no second-party source (only the company's own documents or Wikipedia)"
+            )
     if caveat:
         parts += [caveat, ""]
     if narrative:
@@ -500,7 +711,7 @@ def finalize_draft(
         if exhibit_title:
             parts += [f"### {exhibit_title}", ""]
         parts += [exhibit_md, ""]
-    all_notes = [n for n in (notes or []) if n]
+    all_notes = [n for n in (notes or []) if n] + hygiene_notes
     if ctx.budget.exhausted:
         all_notes.append(f"research stopped at the section budget ({ctx.budget.exhausted})")
     if ctx.budget.notes:

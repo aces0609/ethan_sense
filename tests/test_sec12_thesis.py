@@ -12,7 +12,13 @@ from primer.config import section_budget
 from primer.evidence.store import EvidenceStore
 from primer.graph.main import foundation_pack, intake, new_run, plan_sections, resolve_entity
 from primer.graph.researcher import HANDLERS, build_researcher
-from primer.sections.exhibits_sec12 import classify_rating, page_points, parse_qa
+from primer.sections.exhibits_sec12 import (
+    Debate,
+    classify_rating,
+    page_points,
+    parse_qa,
+    thesis_exhibit,
+)
 from primer.state import Inputs, SectionDraft
 from primer.validate.rules import check_attribution
 
@@ -149,6 +155,111 @@ def test_parse_qa_inline_and_fool_formats():
     assert classify_rating("Reiterated", "Hold") == "open"
 
 
+FAKE_TRANSCRIPT = (
+    "# Acme Industries (ACME) Q3 2026 Earnings Call Transcript\n\n"
+    "**Operator:** Good day. I would like to turn the call over to Pat Lee, Vice President, Investor Relations.\n\n"
+    "**Pat Lee:** Thank you. Joining me today are Dana Cruz, our President and Chief Executive Officer, "
+    "and Sam Ortiz, our Chief Financial Officer. Statements made today may be forward-looking.\n\n"
+    "**Dana Cruz:** Thanks, Pat. Demand was strong across the portfolio this quarter.\n\n"
+    "**Operator:** We will now begin the question-and-answer session. "
+    "Your first question comes from Alex Rivera with Jefferies. Your line is open.\n\n"
+    "**Alex Rivera:** Good morning. How should we think about the production rate path next year "
+    "given the supplier constraints you flagged last quarter?\n\n"
+    "**Sam Ortiz:** Thanks, Alex. We expect to exit next year at a rate of 42 per month, up from 38 today, "
+    "and the supplier constraints we flagged have eased on the two gating parts. "
+    "Capital spending supporting the ramp is already in the plan at roughly $2 billion.\n\n"
+    "**Dana Cruz:** And I would add that the customer side is fully sold for the rate increase.\n\n"
+    "**Operator:** Your next question comes from Jordan Kim with Bernstein.\n\n"
+    "**Jordan Kim:** On margins, is there risk of further charges on the fixed-price programs?\n\n"
+    "**Sam Ortiz:** We took the charge we needed last quarter and do not expect more at this point.\n\n"
+    "**Operator:** That concludes the question-and-answer session.\n\n"
+    "**Dana Cruz:** Thank you all for joining us.\n"
+)
+
+
+def test_parse_qa_pairs_question_with_management_answer():
+    """Review 2026-10-21 §9 fix 7: the Jefferies question is paired with the CFO's answer from
+    the same transcript, the officer named as the transcript names them, cited to the same id."""
+    d = parse_qa(FAKE_TRANSCRIPT, "Q3-2026", "src_0031")
+    assert [x.firm for x in d] == ["Jefferies", "Bernstein"]
+    jef = d[0]
+    assert jef.question.startswith("How should we think about the production rate path")
+    assert jef.answer is not None and jef.answer.startswith(
+        "Thanks, Alex. We expect to exit next year"
+    )
+    # the CEO's follow-on turn is part of the same answer; the next operator line ends it
+    assert "fully sold for the rate increase" in jef.answer
+    assert "On margins" not in jef.answer
+    assert (
+        jef.answered_by
+        == "Sam Ortiz (Chief Financial Officer) and Dana Cruz (President and Chief Executive Officer)"
+    )
+    assert jef.source_id == "src_0031" and len(jef.answer.split()) <= 120
+    # the open question takes its lean from the answer ("ramp" -> bull); Bernstein's stays bear
+    assert jef.lean == "bull" and d[1].lean == "bear"
+    assert d[1].answer.startswith("We took the charge") and d[1].answered_by.startswith("Sam Ortiz")
+    # Motley Fool header form: the officer's title comes from the speaker header
+    fool = (
+        "**Operator**\n\nOur first question comes from the line of Jane Doe with Acme Securities. Please proceed.\n\n"
+        "**Jane Doe** -- *Acme Securities -- Analyst*\n\nThanks. How should we think about backlog conversion next year?\n\n"
+        "**Jim Taiclet** -- *Chairman and CEO*\n\nGood question, Jane. About a third converts within twelve months.\n\n"
+        "**Operator**\n\nThank you. Our next question comes from the line of Bob Roe with Beta Partners.\n\n"
+        "**Bob Roe** -- *Beta Partners -- Analyst*\n\nIs the capex step-up a headwind to the cash return policy?\n"
+    )
+    f = parse_qa(fool, "Q1-2026", "src_0010")
+    assert f[0].answer == "Good question, Jane. About a third converts within twelve months."
+    assert f[0].answered_by == "Jim Taiclet (Chairman and CEO)"
+    assert f[1].answer is None and f[1].answered_by is None
+
+
+def test_thesis_exhibit_carries_the_answer_line():
+    answered = Debate(
+        firm="Jefferies",
+        analyst="Alex Rivera",
+        question="How should we think about the production rate path next year?",
+        quarter="Q3-2026",
+        source_id="src_0031",
+        lean="bull",
+        answer="We expect to exit next year at a rate of 42 per month.",
+        answered_by="Sam Ortiz (Chief Financial Officer)",
+    )
+    unanswered = Debate(
+        firm="Bernstein",
+        analyst="Jordan Kim",
+        question="Is there risk of further charges?",
+        quarter="Q3-2026",
+        source_id="src_0031",
+        lean="bear",
+    )
+    ex = thesis_exhibit(
+        debates=[answered, unanswered],
+        rating=[],
+        rating_claims=[],
+        news=[],
+        company=[],
+        rating_count=None,
+        rating_sid=None,
+    )
+    rows = [ln for ln in ex.markdown.splitlines() if ln.startswith("| Jefferies")]
+    assert (
+        rows
+        and (
+            "Jefferies asked (Q3-2026 call): How should we think about the production rate path next year? "
+            "— What management said (Sam Ortiz (Chief Financial Officer)): We expect to exit next year at a "
+            "rate of 42 per month. [src_0031]"
+        )
+        in rows[0]
+    )
+    assert "Bernstein asked (Q3-2026 call): Is there risk of further charges? [src_0031]" in rows[0]
+    lines = ex.questions_md.splitlines()
+    assert lines[0].startswith("- Jefferies (Q3-2026 call): How should we think")
+    assert lines[1] == (
+        "  - What management said (Sam Ortiz (Chief Financial Officer)): "
+        "We expect to exit next year at a rate of 42 per month. [src_0031]"
+    )
+    assert lines[2].startswith("- Bernstein (Q3-2026 call):") and len(lines) == 3
+
+
 def test_page_points_name_the_firm_only_from_the_page():
     text = (WEB / "lmt_news_analyst.md").read_text(encoding="utf-8")
     pts = page_points(
@@ -213,9 +324,27 @@ def test_section12_with_firecrawl(edgar_mock, firecrawl_mock, output_dir):
     )
     assert any("RBC Capital: boost target" in c and "target $575 from $550" in c for c in cells)
     assert not any("Melius Research" in c for c in cells)
-    # unanswered questions carry the firm and the transcript citation
+    # questions carry the firm and the transcript citation, and the management answer that
+    # follows each in the same transcript sits under it, cited to the same id
     assert "- Melius Research (Q2-2026 call): Can you talk about the F-35 Lot 20" in md
     assert f"[{transcript_sid}]" in md
+    assert "**Analyst questions and what management said" in md
+    assert (
+        "  - What management said (Evan Scott (Chief Financial Officer)): We expect to reach 650 in "
+        f"2027 and 750 by 2028, Kristine, with the investments already in the capex plan. [{transcript_sid}]"
+    ) in md
+    assert (
+        "What management said (James Taiclet (Chairman, President and Chief Executive Officer))"
+        in md
+    )
+    # the bull/bear table carries the answer line with the question it answers
+    assert any(
+        "Morgan Stanley asked (Q2-2026 call): On PAC-3 capacity" in c
+        and "— What management said (Evan Scott (Chief Financial Officer)): We expect to reach 650"
+        in c
+        for c in cells
+    )
+    assert "management answers are the company's statements" in draft.caveat
     # a MarketBeat row whose firm is absent from the page text is dropped; stale rows filtered by date
     assert "Phantom Capital" not in md and "Old House" not in md
     bear_cells = [

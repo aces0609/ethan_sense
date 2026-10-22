@@ -45,6 +45,7 @@ class RunLog:
         self.coverage: dict[str, str] = {}
         self.critic_scores: dict[str, Any] = {}
         self.validation: dict[str, Any] = {}
+        self.reconciliation: dict[str, Any] = {}  # cross-section reconcile node record
         self.errors: list[str] = []
         self.meta: dict[str, Any] = {}
         self._lock = threading.Lock()
@@ -91,6 +92,7 @@ class RunLog:
             "coverage": self.coverage,
             "critic_scores": self.critic_scores,
             "validation": self.validation,
+            "reconciliation": self.reconciliation,
             "errors": self.errors,
         }
 

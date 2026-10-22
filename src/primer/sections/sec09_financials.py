@@ -19,6 +19,7 @@ from primer.llm import invoke_text
 from primer.runlog import RunLog
 from primer.sections.common import ToolContext
 from primer.sections.exhibits import financial_tables
+from primer.sections.exhibits_sec13 import NET_DEBT_FORMULA, net_debt_formula
 from primer.sections.style import HOUSE_STYLE, fmt_money, fmt_pct
 from primer.state import Brief, Claim, Entity, SectionDraft
 
@@ -166,8 +167,8 @@ def _caveat(entity: Entity, fin: AnnualFinancials) -> str:
     span = f"FY{fin.fiscal_years[0]}–FY{fin.fiscal_years[-1]}"
     return (
         f"*Caveat: figures are GAAP as reported in SEC XBRL filings for {span} (fiscal year ends {fye}); "
-        f"the most recently filed value is used where a period was restated, and free cash flow, net debt and "
-        f"margins are derived in-agent with the formulas shown. Segment detail is not in XBRL and is not included here.*"
+        f"the most recently filed value is used where a period was restated, and free cash flow, net debt "
+        f"({NET_DEBT_FORMULA}) and margins are derived in-agent with the formulas shown. Segment detail is not in XBRL and is not included here.*"
     )
 
 
@@ -230,10 +231,16 @@ def _narrative_template(fin: AnnualFinancials, sids: dict[str, str]) -> str:
         lines.append(s + ".")
 
     cash_l, debt_l = fin.value("cash", last), fin.value("total_debt", last)
-    if cash_l is not None and debt_l is not None:
-        lines.append(
-            f"At fiscal year end FY{last} the company held ${fmt_money(cash_l)} million of cash{_cites(fin, sids, 'cash', last)} against ${fmt_money(debt_l)} million of total debt (derived: long-term plus current debt){_cites(fin, sids, 'long_term_debt', last)}, for net debt of ${fmt_money(debt_l - cash_l)} million (derived)."
+    sti_l, nd_l = fin.value("short_term_investments", last), fin.value("net_debt", last)
+    if cash_l is not None and debt_l is not None and nd_l is not None:
+        s = f"At fiscal year end FY{last} the company held ${fmt_money(cash_l)} million of cash{_cites(fin, sids, 'cash', last)}"
+        if sti_l is not None:
+            s += f" and ${fmt_money(sti_l)} million of short-term investments{_cites(fin, sids, 'short_term_investments', last)}"
+        s += (
+            f" against ${fmt_money(debt_l)} million of total debt (derived: long-term plus current debt){_cites(fin, sids, 'long_term_debt', last)}, "
+            f"for net debt of ${fmt_money(nd_l)} million (derived: {net_debt_formula(sti_l is not None)})."
         )
+        lines.append(s)
     bb, dv = fin.value("buybacks", last), fin.value("dividends_paid", last)
     if bb is not None or dv is not None:
         s = f"Capital returned to shareholders in FY{last}: "

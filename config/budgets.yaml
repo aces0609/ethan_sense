@@ -3,10 +3,19 @@
 #
 # Credits: the Firecrawl free plan carries 1,000 credits per month and allows 2 concurrent
 # requests. A /search costs 2 per 10 results, a /scrape 1, a /scrape with a JSON schema 5,
-# a /map 1, a PDF parse 1 per page. Section caps below sum to ~250 credits for a 13-section
-# primer; the foundation pack adds ~25 and the market-data pages (shared by sections 6, 10,
-# 12, 13 and scraped once per run) ~35. Firecrawl responses are cached for 7 days, so a
-# rerun of the same company costs nothing.
+# a /map 1, a PDF parse 1 per page. Firecrawl responses are cached for 7 days, so a rerun
+# of the same company costs nothing.
+#
+# 2026-10-22 (review §9 fix 6): the Phase 2 runs spent 2 to 170 credits of the 420 per-primer
+# cap while sections 3, 5, 6, 12 and 14 all reported dropped queries and "scrape cap 6
+# reached"; the per-section caps bound long before the per-primer cap did. Those five
+# sections now get roughly double their room (searches 4→8 / 3→6, scrapes 6→12, credits
+# 20→40 / 16→32). Section 4 and the foundation budget are unchanged. Arithmetic for a
+# 13-section run (sections 2–14), credits:
+#   sections 2..14 = 12+40+40+40+40+16+16+5+14+16+40+12+32 = 323 (was 227)
+#   + foundation 30 + market_data 40 = 393 < 420 per-primer cap (27 spare)
+# A section's expected spend is below its cap: 8 searches × 2 + 12 scrapes × 1 = 28 of 40,
+# the rest is headroom for PDF parses (1 per page) and the occasional JSON-schema scrape.
 defaults:
   searches: 4            # Firecrawl /search calls per section
   scrapes: 8             # Firecrawl /scrape or /parse calls per section
@@ -33,18 +42,18 @@ per_primer:
 sections:
   1:  {pages: 1.0, searches: 0, scrapes: 0, credits: 0}
   2:  {pages: 1.5, searches: 2, scrapes: 4, credits: 12}
-  3:  {pages: 2.0, searches: 4, scrapes: 6, credits: 20}
+  3:  {pages: 2.0, searches: 8, scrapes: 12, credits: 40}   # was 4 / 6 / 20
   4:  {pages: 2.0, searches: 6, scrapes: 10, credits: 40, use_agent: false}
-  5:  {pages: 2.0, searches: 4, scrapes: 6, credits: 20}
-  6:  {pages: 2.0, searches: 3, scrapes: 6, credits: 20}
+  5:  {pages: 2.0, searches: 8, scrapes: 12, credits: 40}   # was 4 / 6 / 20
+  6:  {pages: 2.0, searches: 6, scrapes: 12, credits: 40}   # was 3 / 6 / 20
   7:  {pages: 1.0, searches: 3, scrapes: 5, credits: 16}
   8:  {pages: 1.0, searches: 3, scrapes: 5, credits: 16}
   9:  {pages: 1.5, searches: 1, scrapes: 2, credits: 5}
   10: {pages: 2.0, searches: 3, scrapes: 4, credits: 14}
   11: {pages: 1.5, searches: 3, scrapes: 5, credits: 16}
-  12: {pages: 2.0, searches: 4, scrapes: 6, credits: 20}
+  12: {pages: 2.5, searches: 8, scrapes: 12, credits: 40}   # was 4 / 6 / 20; pages 2.5: the AlphaSense thesis sections run ~4 pages (2026-10-22)
   13: {pages: 1.5, searches: 2, scrapes: 4, credits: 12}
-  14: {pages: 1.0, searches: 3, scrapes: 6, credits: 16}
+  14: {pages: 1.0, searches: 6, scrapes: 12, credits: 32}   # was 3 / 6 / 16
 
 # Numeric-consistency tolerance by metric family (fraction of the larger value).
 numeric_tolerance:

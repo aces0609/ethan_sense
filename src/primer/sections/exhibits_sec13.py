@@ -35,11 +35,22 @@ class Val:
         return self.value is not None
 
 
+NET_DEBT_FORMULA = "total debt − cash − short-term investments"
+NO_STI_SUFFIX = " (no short-term investments fact reported; 0 assumed)"
+
+
+def net_debt_formula(has_short_term_investments: bool) -> str:
+    """The net-debt formula as printed wherever net debt appears (sections 9, 11, 13 and the
+    derived-figures appendix); says when the filer reports no short-term investments."""
+    return NET_DEBT_FORMULA + ("" if has_short_term_investments else NO_STI_SUFFIX)
+
+
 FORMULAS: dict[str, str] = {
     "market_cap": "share price × shares outstanding",
     "total_debt": "long-term debt + short-term debt (latest balance-sheet instant)",
-    "enterprise_value": "market cap + total debt − cash",
-    "net_debt": "total debt − cash",
+    "enterprise_value": "market cap + total debt − cash − short-term investments",
+    "net_debt": NET_DEBT_FORMULA,
+    "short_term_investments": "cash, equivalents and short-term investments − cash",
     "ebitda": "FY operating income + FY depreciation and amortization",
     "ev_ebitda_ltm_ratio": "enterprise value ÷ EBITDA (latest full fiscal year)",
     "pe_ltm_ratio": "share price ÷ FY diluted EPS",
@@ -54,6 +65,7 @@ LABELS: dict[str, str] = {
     "shares": "Shares outstanding",
     "market_cap": "Market capitalisation",
     "cash": "Cash and equivalents",
+    "short_term_investments": "Short-term investments and marketable securities",
     "long_term_debt": "Long-term debt",
     "short_term_debt": "Short-term debt and current maturities",
     "total_debt": "Total debt",
@@ -77,6 +89,7 @@ LTM_ROWS = (
     "shares",
     "market_cap",
     "cash",
+    "short_term_investments",
     "long_term_debt",
     "short_term_debt",
     "total_debt",
@@ -135,11 +148,33 @@ def _div(a: Val | None, b: Val | None) -> float | None:
     return a.value / b.value  # type: ignore[operator]
 
 
+def short_term_investments_val(v: dict[str, Val]) -> Val | None:
+    """Short-term investments and marketable securities: the reported fact when the filer
+    has one, else the combined cash-and-short-term-investments fact minus cash (derived),
+    else None (the caller nets cash only and says so)."""
+    sti = v.get("short_term_investments")
+    if sti and sti.ok:
+        return sti
+    combined, cash = v.get("cash_and_short_term_investments"), v.get("cash")
+    if combined and combined.ok and cash and cash.ok and combined.value >= cash.value:  # type: ignore[operator]
+        return _derived(
+            "short_term_investments",
+            combined.value - cash.value,  # type: ignore[operator]
+            combined.period,
+            "USD",
+            combined,
+            cash,
+        )
+    return None
+
+
 def derive(v: dict[str, Val], fy: int) -> dict[str, Val]:
     """Add market cap, total debt, net debt, EV, EBITDA and the LTM multiples to the inputs
-    (price, shares, cash, long_term_debt, short_term_debt, revenue, operating_income,
-    depreciation_amortization, eps_diluted, free_cash_flow). Missing operands leave the
-    derived value absent, never substituted."""
+    (price, shares, cash, short_term_investments, long_term_debt, short_term_debt, revenue,
+    operating_income, depreciation_amortization, eps_diluted, free_cash_flow). Net debt and
+    EV net cash and short-term investments; a filer with no short-term-investments fact nets
+    cash only and the formula note says so. Other missing operands leave the derived value
+    absent, never substituted."""
     out = dict(v)
     fyl = f"FY{fy} (latest full year)"
     price, shares = out.get("price"), out.get("shares")
@@ -160,14 +195,27 @@ def derive(v: dict[str, Val], fy: int) -> dict[str, Val]:
             note=FORMULAS["total_debt"]
             + ("" if (st and st.ok) else "; no current-debt fact, 0 assumed"),
         )
+    sti = short_term_investments_val(out)
+    if sti:
+        out["short_term_investments"] = sti
+    else:
+        out.pop("short_term_investments", None)
+    sti_v = sti.value if sti else 0.0
     td = out.get("total_debt")
     if td and cash and cash.ok:
-        out["net_debt"] = _derived("net_debt", td.value - cash.value, td.period, "USD", td, cash)  # type: ignore[operator]
+        nd = _derived("net_debt", td.value - cash.value - sti_v, td.period, "USD", td, cash, sti)  # type: ignore[operator]
+        if nd is None:  # sti is None: nets cash only, and the note says so
+            nd = _derived("net_debt", td.value - cash.value, td.period, "USD", td, cash)  # type: ignore[operator]
+            nd.note = net_debt_formula(False)  # type: ignore[union-attr]
+        out["net_debt"] = nd
     mc = out.get("market_cap")
     if mc and td and cash and cash.ok:
-        out["enterprise_value"] = _derived(
-            "enterprise_value", mc.value + td.value - cash.value, mc.period, "USD", mc, td, cash
-        )  # type: ignore[operator]
+        ev_value = mc.value + td.value - cash.value - sti_v  # type: ignore[operator]
+        ev = _derived("enterprise_value", ev_value, mc.period, "USD", mc, td, cash, sti)
+        if ev is None:
+            ev = _derived("enterprise_value", ev_value, mc.period, "USD", mc, td, cash)
+            ev.note = FORMULAS["enterprise_value"] + NO_STI_SUFFIX  # type: ignore[union-attr]
+        out["enterprise_value"] = ev
     oi, da = out.get("operating_income"), out.get("depreciation_amortization")
     if oi and da and oi.ok and da.ok:
         out["ebitda"] = _derived("ebitda", oi.value + da.value, fyl, "USD", oi, da)  # type: ignore[operator]
@@ -230,6 +278,8 @@ def ltm_table(vals: dict[str, Val], section: int = 13, has_price: bool = True) -
                 rows.append([label + " — derived", "n/a (no quote)", "", "derived"])
             elif key in PRICE_DEPENDENT or key in ("total_debt", "net_debt", "ebitda"):
                 rows.append([label + " — derived", "n/a", "", "derived"])
+            elif key == "short_term_investments":
+                rows.append([label, "n/a (no XBRL fact; 0 assumed in net debt and EV)", "", "XBRL"])
             continue
         if v.concept == "derived":
             label += f" — derived: {v.note}"
@@ -250,6 +300,7 @@ def ltm_table(vals: dict[str, Val], section: int = 13, has_price: bool = True) -
         for k in (
             "market_cap",
             "total_debt",
+            "net_debt",
             "enterprise_value",
             "ebitda",
             "ev_ebitda_ltm_ratio",

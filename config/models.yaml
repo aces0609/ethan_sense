@@ -36,3 +36,4 @@ roles:
   critic:         {tier: strong}   # critic
   synthesizer:    {tier: strong}   # key_takeaways
   judge:          {tier: strong}   # eval harness rubric
+  reconciler:     {tier: cheap}    # cross-section reconcile node (one structured match call)

@@ -14,6 +14,12 @@ ATTRIBUTION = re.compile(
     r"\b([A-Z][A-Za-z&.'\-]+(?: [A-Z][A-Za-z&.'\-]+){0,3}) (notes|argues|estimates|expects|forecasts|believes|sees|wrote|writes|says|said|argued|estimated|maintains|rates)\b"
 )
 NOT_FIRMS = {
+    "He",
+    "She",
+    "They",
+    "We",
+    "Executives",
+    "Officers",
     "The",
     "This",
     "It",
@@ -105,6 +111,32 @@ def check_tier(claims: list[dict[str, Any]], store: EvidenceStore) -> dict:
     return {"ok": not flagged, "flagged": flagged}
 
 
+def _is_company_person(name: str, sections_md: dict[int, str]) -> bool:
+    """True when `name` (one or two words) matches a person in the section 8 officer table or
+    a CEO/CFO sentence anywhere in the primer, so "Ortberg said" is not a firm attribution."""
+    words = name.split()
+    if len(words) > 3:
+        return False
+    surname = words[-1].lower()
+    text = sections_md.get(8, "")
+    officer_rows = re.findall(r"^\| ([A-Z][^|]+?) \|", text, re.M)
+    for row in officer_rows:
+        row_words = re.sub(r"\[\^\d+\]|\[src_\d{4}\]", "", row).lower().replace(",", " ").split()
+        if surname in row_words:
+            return True
+    joined = " ".join(sections_md.values())
+    return bool(
+        re.search(
+            rf"{re.escape(words[-1])}[^.]{{0,80}}(?:CEO|CFO|COO|Chief|President|Chairman|Executive Vice President)",
+            joined,
+        )
+        or re.search(
+            rf"(?:CEO|CFO|COO|Chief [A-Za-z ]+Officer|President|Chairman)[^.]{{0,40}}{re.escape(words[-1])}",
+            joined,
+        )
+    )
+
+
 def check_attribution(sections_md: dict[int, str], store: EvidenceStore) -> dict:
     """'Firm notes/argues…' must cite a source whose text names that firm."""
     problems = []
@@ -118,6 +150,8 @@ def check_attribution(sections_md: dict[int, str], store: EvidenceStore) -> dict
             firm = m.group(1)
             if firm.split()[-1] in NOT_FIRMS and len(firm.split()) == 1:
                 continue
+            if _is_company_person(firm, sections_md):
+                continue  # an officer quoted by name is management speaking, not a broker view
             sids = re.findall(r"\[(src_\d{4})\]", sentence)
             if not sids:
                 problems.append(
@@ -129,7 +163,15 @@ def check_attribution(sections_md: dict[int, str], store: EvidenceStore) -> dict
                     }
                 )
                 continue
-            named = any(firm.lower() in store.text(s).lower() for s in sids if store.has(s))
+            # a person quoted with a title ("Vice President Jonathan Root said") is checked by
+            # surname, since the source names the person, not the title phrase
+            probe = firm.lower()
+            if re.search(
+                r"\b(vice president|president|analyst|director|managing|senior|chief|officer|partner)\b",
+                probe,
+            ):
+                probe = firm.split()[-1].lower()
+            named = any(probe in store.text(s).lower() for s in sids if store.has(s))
             if not named:
                 problems.append(
                     {

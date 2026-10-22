@@ -1,6 +1,7 @@
 """Section 14 handler on the fixtures: eight 8-Ks fall in the trailing 12 months of the
 submissions fixture (all served as the fake 8-K text); an IR site map with dated news
-links; news hits whose pages carry no date. The recency validator must pass."""
+links; one news hit whose URL carries a date (cited with that date) and one whose page and
+URL carry none (noted, never cited). The recency validator must pass."""
 
 from __future__ import annotations
 
@@ -126,7 +127,7 @@ def test_section14_with_firecrawl(edgar_mock, firecrawl_mock, output_dir):
             ],
             "announces": [
                 _hit(
-                    "https://www.breakingdefense.com/2026/09/lockheed-announces/",
+                    "https://www.breakingdefense.com/lockheed-announces/",
                     "Lockheed announces",
                 )
             ],
@@ -167,9 +168,13 @@ def test_section14_with_firecrawl(edgar_mock, firecrawl_mock, output_dir):
     assert not any(c[0] == "scrape" and "2025-03-01" in c[1] for c in fc.calls)
     assert not any(c[0] == "scrape" and "undated-release" in c[1] for c in fc.calls)
     assert "undated pages not in the log" in md
-    assert not any(
-        "defensenews" in store.get(s).url for s in set(re.findall(r"\[(src_\d{4})\]", md))
-    )
+    cited = {store.get(s).url for s in set(re.findall(r"\[(src_\d{4})\]", md))}
+    # the undated page is noted, not cited; the news page whose URL carries a date is dated
+    # from it (review 2026-10-21 §7) and enters the log
+    assert not any("breakingdefense" in u for u in cited)
+    assert any("defensenews" in u for u in cited)
+    news_rows = [r for r in rows if "defensenews" in r[2] or "news (" in r[2]]
+    assert news_rows and news_rows[0][0].startswith("2026-10-01")
     metrics = {c.metric: c for c in draft.claims}
     assert (
         metrics["event_count_trailing_12m"].value == len(rows)

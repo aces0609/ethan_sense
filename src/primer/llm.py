@@ -145,7 +145,13 @@ def invoke_structured(
         runlog.count(f"llm_calls_{role}")
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    structured = llm.with_structured_output(schema, include_raw=True)
+    # Claude 5.5 models reject forced tool calling for structured output (the default method),
+    # which silently sent every structured call to the template path; json_schema works on both
+    # providers that support it, and the default stays the fallback for the rest.
+    try:
+        structured = llm.with_structured_output(schema, method="json_schema", include_raw=True)
+    except (TypeError, ValueError, NotImplementedError):
+        structured = llm.with_structured_output(schema, include_raw=True)
     out = _call(
         role,
         runlog,

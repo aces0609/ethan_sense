@@ -15,7 +15,7 @@ from typing import Any
 from primer.clients.edgar import AnnualFinancials
 from primer.sections.common import claim, md_table
 from primer.sections.exhibits import ExhibitResult
-from primer.sections.exhibits_sec13 import Val, fmt_val
+from primer.sections.exhibits_sec13 import NET_DEBT_FORMULA, Val, fmt_val
 from primer.sections.style import fmt_money
 from primer.state import Claim
 
@@ -142,6 +142,18 @@ def debt_table(
                 claims.append(c)
 
     add("Cash and equivalents", vals.get("cash"), "cash")
+    sti = vals.get("short_term_investments")
+    if sti is not None and sti.ok:
+        add("Short-term investments and marketable securities", sti, "short_term_investments")
+    else:
+        rows.append(
+            [
+                "Short-term investments and marketable securities",
+                "n/a (no XBRL fact; 0 assumed in net debt)",
+                "",
+                "XBRL",
+            ]
+        )
     add("Long-term debt", vals.get("long_term_debt"), "long_term_debt")
     add("Short-term debt and current maturities", vals.get("short_term_debt"), "short_term_debt")
     add(
@@ -149,7 +161,7 @@ def debt_table(
         vals.get("total_debt"),
         "total_debt",
     )
-    add("Net debt (derived: total debt − cash)", vals.get("net_debt"), "net_debt")
+    add(f"Net debt (derived: {NET_DEBT_FORMULA})", vals.get("net_debt"), "net_debt")
     if revolver:
         amt, matched, sid, period = revolver
         rv = Val(amt, [sid], period, f"filing text: “{matched}”", "USD", "text", matched)

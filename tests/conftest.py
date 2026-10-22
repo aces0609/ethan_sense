@@ -93,6 +93,36 @@ FAKE_10K_HTML = """<html><head><title>lmt-20251231</title><style>.x{}</style></h
 <p><b>Item 15. Exhibits</b></p><p>{filler}</p>
 </div></body></html>""".replace("{filler}", _FILLER)
 
+# A Boeing-style 10-K for the review fixes (docs/REVIEW-PRIMERS-2026-10-21.md §9 item 9): the
+# Human Capital passage carries the company-wide count and a union-local count, the segment
+# note describes non-U.S. customers (including FMS routed through the U.S. government) and the
+# U.S. government share separately, and the Part I officer section is prose, not a table.
+FAKE_10K_BA_HTML = """<html><head><title>ba-20251231</title></head><body>
+<div>
+<p>The Boeing Company [NYSE: BA]. Our principal executive offices are located at 929 Long Bridge Drive, Arlington, Virginia 22202.</p>
+<p><b>Item 1. Business</b></p>
+<p>The Boeing Company, together with its subsidiaries, is one of the world's major aerospace firms. {filler}</p>
+<p>We operate in three reportable segments: Commercial Airplanes (BCA), Defense, Space &amp; Security (BDS), and Global Services (BGS). {filler}</p>
+<p><b>Human Capital</b></p>
+<p>As of December 31, 2025, we employed approximately 182,000 people across our businesses. Our workforce is one of our most important assets. {filler}</p>
+<p>Approximately 3,200 employees at our St. Louis site are represented by IAM District 837 under a collective bargaining agreement ratified in 2025. {filler}</p>
+<p><b>Information About Our Executive Officers</b></p>
+<p>Our executive officers as of February 1, 2026 are listed below.</p>
+<p>Robert K. Ortberg, 65, has been President and Chief Executive Officer since August 2024. Prior to joining Boeing he served as Chief Executive Officer of Rockwell Collins.</p>
+<p>Jesus Malave, 57, has been Executive Vice President and Chief Financial Officer since August 2025. {filler}</p>
+<p>Stephanie F. Pope, 53, is Executive Vice President, President and Chief Executive Officer of Commercial Airplanes, a position she has held since March 2024.</p>
+<p>Stephen Parker, 59, has been Executive Vice President, President and Chief Executive Officer of Defense, Space &amp; Security since January 2026.</p>
+<p><b>Item 1A. Risk Factors</b></p>
+<p>We depend on a limited number of customers for a significant portion of our revenues. {filler}</p>
+<p><b>Item 7. Management's Discussion and Analysis of Financial Condition and Results of Operations</b></p>
+<p>Total revenues increased in 2025. {filler}</p>
+<p><b>Item 8. Financial Statements and Supplementary Data</b></p>
+<p>Note 2 – Segment Information</p>
+<p>Sales to non-U.S. customers, including foreign military sales through the U.S. government, represented 46% of our revenues in 2025. Revenues from the U.S. government, including FMS, accounted for 42% of total revenues in 2025. {filler}</p>
+<p><b>Item 10. Directors, Executive Officers and Corporate Governance</b></p>
+<p>Information about our directors is incorporated by reference to the proxy statement. Information about our executive officers appears in Part I of this report. {filler}</p>
+</div></body></html>""".replace("{filler}", _FILLER)
+
 FAKE_10Q_HTML = """<html><head><title>lmt-20260628</title></head><body><div>
 <p><b>Item 1. Financial Statements</b></p>
 <p>Note 1 – Basis of Presentation. {filler}</p>
@@ -435,6 +465,7 @@ def usaspending_mock():
 
 
 __all__ = [
+    "FAKE_10K_BA_HTML",
     "FAKE_10K_HTML",
     "FAKE_10Q_HTML",
     "FAKE_8K_HTML",

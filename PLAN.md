@@ -232,6 +232,8 @@ Ordered by risk, highest first:
 - **3.7 deepagents comparison.** Only if Phase 2 showed the hand-built subgraph costly to maintain: rebuild one section with `create_deep_agent(subagents=[...])`, compare code size, cost and validator pass rate, record the verdict in `docs/DECISIONS.md`.
 - **3.8 Ambiguity interrupt.** `resolve_entity` raises an interrupt when two plausible entities score close; CLI prompts; `debug: true` review interrupt before export.
 
+**Status (2026-10-22): part A done.** Phase 3 was split after the editorial review ([docs/REVIEW-PRIMERS-2026-10-21.md](docs/REVIEW-PRIMERS-2026-10-21.md)): part A is the review's nine pipeline fixes, part B is items 3.1–3.8 above. Part A is implemented and covered by 120 tests: a cross-section reconcile node, exhibit validators, section 14 feeding the later sections, net debt and EV netting short-term investments, dated and correctly typed sources, 10-K-item extraction for headcount and officers, management answers in section 12, prose hygiene, and raised narrative-section budgets. Both primers pass the full gate with the models; the before/after table and the decisions are in [docs/DECISIONS.md](docs/DECISIONS.md) (Boeing net debt now matches the reference, headcount reads 182,000, undated sources fell from ~48% to ~20%, every "not in the evidence" contradiction is gone). Not yet done: part B (cache test, resume kill-test, offline replay, private-company path on SpaceX, two non-aerospace tickers, domain policy, ambiguity interrupt), repair rather than drop of broken exhibits, and the section 12 thesis exhibit.
+
 ---
 
 ## 4. Phase 4 — Operate

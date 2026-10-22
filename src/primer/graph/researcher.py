@@ -39,7 +39,9 @@ from primer.sections.common import (
     run_memo,
     unavailable_draft,
 )
+from primer.sections.text_tools import segment_names_from_text
 from primer.state import SECTION_TITLES, Brief, Entity, ResearcherState, SectionDraft
+from primer.validate.exhibits import apply_exhibit_check
 
 REGISTRY: dict[int, str] = {
     2: "primer.sections.sec02_overview",
@@ -115,6 +117,7 @@ def build_context(state: ResearcherState, section: int) -> ToolContext:
         usaspending=usaspending,
         samgov=samgov,
         brief=brief,
+        recent_events=list(state.get("recent_events") or []),
     )
     if entity.ticker:
         # one adapter per run; pages are scraped once and shared between sections
@@ -247,10 +250,63 @@ def compress_and_draft(state: ResearcherState) -> dict[str, Any]:
     return {"draft": d.model_dump(mode="json"), "iteration": d.iterations}
 
 
+def _segments(state: ResearcherState) -> list[str]:
+    """Segment names from the foundation 10-K, computed once per run (for the exhibit
+    validator's "segment n/a while the text names it" rule)."""
+    run_dir = Path(state["run_dir"])
+
+    def build() -> list[str]:
+        try:
+            store = EvidenceStore.for_run(run_dir, as_of=date.fromisoformat(state["as_of"]))
+            sids = (state.get("foundation") or {}).get("sources", {}).get("10-K") or []
+            for sid in sids:
+                if store.has(sid):
+                    return segment_names_from_text(store.text(sid)[:400_000])
+        except Exception:  # noqa: BLE001 - a missing 10-K only weakens one validator rule
+            pass
+        return []
+
+    return list(run_memo(run_dir, "segment_names", build))
+
+
+def validate_exhibits(draft: SectionDraft, segments: list[str], runlog) -> SectionDraft:
+    """Drop broken exhibits before the critic scores the draft (review §9 item 2): the prose
+    is kept, coverage becomes partial and the coverage line names the dropped exhibit."""
+    chk = apply_exhibit_check(draft.markdown, draft.coverage, segments=segments)
+    if chk.ok:
+        return draft
+    draft.markdown = chk.markdown
+    if draft.coverage == "full":
+        draft.coverage = "partial"
+    if chk.tables_left == 0:
+        draft.exhibit_present = False
+    # the claims a dropped exhibit produced leave with it (they are not in the text any more)
+    rules = {r for d in chk.dropped for r in d["rules"]}
+    prefixes = tuple(
+        p
+        for rule, p in (
+            ("ownership_label", "ownership_pct_"),
+            ("bare_key_metric", "product_key_metric_"),
+        )
+        if rule in rules
+    )
+    if prefixes:
+        draft.claims = [c for c in draft.claims if not c.metric.startswith(prefixes)]
+    draft.critic_notes = list(draft.critic_notes) + [
+        f"exhibit '{d['exhibit']}' dropped: {'; '.join(d['reasons'][:2])}" for d in chk.dropped
+    ]
+    runlog.validation.setdefault("exhibits", {})[str(draft.section)] = {
+        "dropped": chk.dropped,
+        "problems": chk.problems[:20],
+    }
+    return draft
+
+
 def critic(state: ResearcherState) -> dict[str, Any]:
     brief = Brief.model_validate(state["brief"])
     draft = SectionDraft.model_validate(state["draft"])
     runlog = get_runlog(state["run_dir"])
+    draft = validate_exhibits(draft, _segments(state), runlog)
     sc = critic_mod.score(
         draft, brief, float(section_budget(brief.section).get("pages", 1.5)), runlog
     )
