@@ -144,8 +144,10 @@ def test_failed_fetches_are_recorded_and_replay_as_failures_not_misses(output_di
     with pytest.raises(RuntimeError):
         c.get_or_fetch("GET /x|2026-10-21", boom)
     cache.activate(run_dir, "replay", log_dir=log_dir)
-    with pytest.raises(CacheMiss, match="recorded failure .RuntimeError."):
+    # a replayed failure prints as the original exception did ("HTTP 500"), not as a replay note
+    with pytest.raises(CacheMiss, match="HTTP 500") as replayed:
         c.get_or_fetch("GET /x|2026-10-22", lambda: pytest.fail("fetched"))
+    assert repr(replayed.value) == "RuntimeError('HTTP 500')"
     rl = get_runlog(log_dir)
     assert rl.counters.get("replay_misses", 0) == 0
     assert rl.counters["replay_recorded_errors"] == 1

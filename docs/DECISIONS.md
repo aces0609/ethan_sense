@@ -212,3 +212,45 @@ Runs: Lockheed `output/LMT/2026-10-22-e4b82356`, Boeing `output/BA/2026-10-22-fe
 
 Known limits carried into Phase 3 part B: dropped exhibits are not repaired (3 per primer: products-by-segment, peer positioning, ownership); 9–10 denials per primer stay unmatched; the model-side reconciler still raises period-different backlog and guidance conflicts; section 12's exhibit scores 3.17 on the judge (rating dump plus Q&A, not a thesis); the SAM.gov personal quota was spent by 21 Oct runs, so the locations tables came from cache; the broker layer is unchanged (review §9 item 10).
 
+
+
+## 2026-10-22 — Phase 3 part B: hardening, verified live
+
+Scope decision: the tool is used on defense companies only, so the defense configuration is the default for every company (trade press, sector queries, peer names), the technology, pharma and industrial settings were removed, and the eval set's Apple and Pfizer entries became Northrop Grumman and L3Harris. Private companies and unfamiliar SIC codes no longer fall through to an empty configuration.
+
+### What was verified live, and how
+
+| Item | Live check | Result |
+|---|---|---|
+| 3.2 resume | Lockheed run killed with `taskkill /T /F` 195 s in (all 13 sections started, no primer yet), then `primer resume` | Finished; only section 12 (in flight at the kill) ran again, the other twelve ran once; `run.json` accounting cumulative (`resumed: 1`, 411.6 s total) |
+| 3.3 replay | Northrop Grumman run (live model calls and APIs), then `primer replay` in a fresh process, no network | `primer.mdx`, `sources.json` and `claims.json` identical; 0 missed lookups, 0 missed model calls, 0 network attempts; exit 0. The recording is about 53 MB per run |
+| 3.1 cache | Warm-cache runs | 8 to 14 Firecrawl credits for a full Lockheed run against 100 to 220 cold |
+| 3.6 policy | Lockheed run | 458 URLs allowed, 5 limited, 3 denied, 3 blocked by robots.txt, all counted in `meta.policy` |
+| 3.4 private path, 3.8 ambiguity prompt | Offline tests only (24 and 19 tests) | Not run live: both Firecrawl keys ran out of credits (0 and 10 of 1,000 left) after the L3Harris and Northrop runs |
+
+### Defects the live runs found (each fixed, with a regression test)
+
+| Defect | Cause | Fix |
+|---|---|---|
+| L3Harris: FY2023 missing, FY2022 mislabelled, FY2025 revenue empty | Fiscal years labelled from EDGAR's declared year-end month, wrong for 52/53-week filers (and for CACI, which EDGAR lists as December); FY2025 revenue tagged with a 90-day period | Labels from each filing's own `fy` and the data's period ends; the 90-day fact repaired from the nine-month 10-Q fact; display "52/53-week year ending 2026-01-02" |
+| Replay not exact (60 missed model calls) | Section 13 iterated a set of source ids, so prompt order differed per process | `dict.fromkeys`; `tests/test_determinism.py` scans the source for the pattern |
+| Replay not exact (second cause) | `sources.yaml` edited after the run started; the planner prompt differed | Every run snapshots `config/*.yaml` and the code commit; replay and resume read the run's own snapshot; the CLI warns when the code differs |
+| Replay not exact (third cause) | A replayed failure printed differently from the original (`RecordedError(...)` against `HTTPStatusError(...)`), and that text is embedded in the primer and in prompts | `RecordedError` reprs and prints as the original exception |
+| L3Harris section 3 "unavailable: no Item 1" | The Item chunker required headings at the start of a line; L3Harris renders them in table cells and only Item 16 was found | Pipes allowed around headings; all 16 items now chunk |
+| L3Harris attribution failure | The sentence splitter cut "CFO Kenneth L. Bedingfield said ..." after the initial; citations were read per sentence | Citations read per line; initials and "U.S." kept in one sentence; titled names checked by surname |
+| Section 12 over its page budget in every run | Each analyst question printed twice (narrative, then an "unanswered" list with answers) | The list holds only questions management deferred or left unanswered |
+| Northrop section 4 "unavailable" | USAspending returns 503 for a text search over 31 recipient identifiers (Northrop resolves to 31 UEIs; Lockheed's 17 passed) | Requests retry transient 5xx and 429 (5 attempts, about 53 s of backoff); recipient sets over 8 identifiers are batched and merged by amount (awards) or summed (categories); a failed batch is skipped and logged |
+| Junk programs "AND", "SPACE", "SYSTEMS" in section 4 | All-caps heading lines in the 10-K matched the acronym pattern | Heading lines dropped before acronym extraction; generic-word lists extended |
+| Section 3 listed the company against itself | The peer fallback names included the company | Filtered |
+
+### Decisions
+
+| Decision | Why | Where |
+|---|---|---|
+| Config is an input to a run | It shapes prompts and frontmatter; a replay must use the config the run used | `replay.snapshot_config`, `config.use_config_dir`, `PRIMER_CONFIG_DIR` |
+| A replay compares the code commit | Misses can come from code changes, not nondeterminism | `inputs.json` `code`, CLI note |
+| Fiscal year follows the filing's own `fy`, never EDGAR's declared month | The declared month is wrong for several filers | `clients/edgar.py` |
+| USAspending recipient sets batched at 8 | One request over many OR terms times out | `clients/usaspending.py` `MAX_TERMS` |
+| The shared recorded-fixture USAspending mock disables batching | It ignores the request filter, so batches would double-count | `tests/conftest.py` |
+
+Known limits after part B: the SAM.gov personal quota was spent by the day's runs (locations come from cache or the place-of-performance view); Northrop's B-21 awards are largely classified, so B-21 appears in prose rather than as a table row; sections 3, 5, 6, 8, 10 and 14 stay `partial` on the free tier of web research; the private path and the ambiguity prompt are tested offline only; `eval-set --run` has not been executed.

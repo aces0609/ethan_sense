@@ -404,3 +404,22 @@ def test_program_keywords_and_assignment_are_conservative():
         s4.federal_fy(date(2026, 10, 21)) == 2027
         and s4.latest_complete_fy(date(2026, 9, 30)) == 2025
     )
+
+
+def test_all_caps_heading_lines_do_not_become_programs():
+    """Northrop Grumman's 10-K headings ("SPACE SYSTEMS", "HISTORY AND ORGANIZATION") produced
+    programs named SPACE, SYSTEMS and AND on 2026-10-22."""
+    from primer.sections.sec04_programs import drop_heading_lines, program_keywords
+
+    item1 = (
+        "HISTORY AND ORGANIZATION\n\nNorthrop Grumman is a technology company.\n\n"
+        "SPACE SYSTEMS\n\nSpace Systems builds the B-21 Raider and the Sentinel (GBSD) program "
+        "and supports the IBCS command system. Programs include Global Hawk and Triton.\n\n"
+        "AERONAUTICS SYSTEMS AND MISSION SYSTEMS\n\nThe backlog (BACKLOG) is large.\n"
+    )
+    kept = drop_heading_lines(item1)
+    assert "SPACE SYSTEMS" not in kept and "HISTORY AND ORGANIZATION" not in kept
+    assert "B-21 Raider" in kept and "IBCS" in kept
+    kw = program_keywords(item1, "NORTHROP GRUMMAN CORP")
+    assert "B-21" in kw and "IBCS" in kw
+    assert not ({"AND", "SPACE", "SYSTEMS", "BACKLOG"} & set(kw))

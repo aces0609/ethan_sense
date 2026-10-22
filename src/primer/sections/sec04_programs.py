@@ -98,6 +98,20 @@ NAME_TOKEN = re.compile(
 )
 
 GENERIC_ACRONYMS = {
+    "BACKLOG",
+    "GHG",
+    "APAC",
+    "EMEA",
+    "IAM",
+    "SPEEA",
+    "UAW",
+    "AND",
+    "THE",
+    "FOR",
+    "SPACE",
+    "SYSTEMS",
+    "ITEM",
+    "PART",
     "AIR",
     "SEA",
     "LAND",
@@ -173,6 +187,14 @@ GENERIC_ACRONYMS = {
     "ASC",
 }
 GENERIC_WORDS = {
+    # words that head capitalised lists in a 10-K but are not programs
+    "commitments",
+    "communications",
+    "weapons",
+    "sustainability",
+    "report",
+    "practices",
+    "act",
     "inc",
     "llc",
     "corp",
@@ -432,6 +454,23 @@ def _parent_uei(
     return uei_set[0] if uei_set else None
 
 
+def drop_heading_lines(text: str) -> str:
+    """The text without all-caps heading lines ("SPACE SYSTEMS", "HISTORY AND ORGANIZATION"):
+    their words matched the all-caps acronym pattern and became "programs" named AND, SPACE and
+    SYSTEMS in Northrop Grumman's section 4 (2026-10-22). A real acronym sits in a body line."""
+    keep = []
+    for line in text.split("\n"):
+        letters = [c for c in line if c.isalpha()]
+        is_heading = (
+            len(letters) >= 4
+            and len(line.split()) >= 2
+            and sum(c.isupper() for c in letters) / len(letters) >= 0.9
+        )
+        if not is_heading:
+            keep.append(line)
+    return "\n".join(keep)
+
+
 def program_keywords(
     item1: str,
     company_name: str,
@@ -468,7 +507,7 @@ def program_keywords(
         aliases = [name] if name and name.lower() not in GENERIC_WORDS else []
         add(desig, *aliases)
     defined = {acr: phrase.strip() for phrase, acr in DEFINED.findall(text)}
-    for acr in ACRONYM.findall(text):
+    for acr in ACRONYM.findall(drop_heading_lines(text)):
         if acr in GENERIC_ACRONYMS or acr in out or re.search(r"\d", acr) or acr.lower() in me:
             continue
         if ROMAN.fullmatch(acr):

@@ -51,7 +51,27 @@ class CacheMiss(KeyError):
 class RecordedError(CacheMiss):
     """The original run failed to fetch this key (HTTP error, offline miss); the replay fails
     the same way. A CacheMiss subclass so callers that treat a miss as "go fetch" take their
-    failure path; not counted as a replay miss."""
+    failure path; not counted as a replay miss.
+
+    It prints as the original exception did (`repr` and `str`), because handlers put the
+    error text into the primer and into model prompts: a replay that words the failure
+    differently diverges from the original (found on the 2026-10-22 Northrop Grumman replay,
+    where a USAspending 503 appeared as a coverage line in both)."""
+
+    def __init__(self, message: str, err_type: str | None = None, original: str | None = None):
+        super().__init__(message)
+        self.err_type = err_type
+        self.original = original
+
+    def __repr__(self) -> str:
+        if self.err_type is not None and self.original is not None:
+            return f"{self.err_type}({self.original!r})"
+        return super().__repr__()
+
+    def __str__(self) -> str:
+        if self.original is not None:
+            return self.original
+        return super().__str__()
 
 
 class OfflineViolation(RuntimeError):
@@ -121,7 +141,7 @@ class _Session:
 
     def record_error(self, namespace: str, key: str, err_type: str, message: str) -> None:
         text = json.dumps(
-            {"key": canonical_key(key), "error": {"type": err_type, "message": message[:500]}}
+            {"key": canonical_key(key), "error": {"type": err_type, "message": message[:4000]}}
         )
         # never replace a recorded body with an error from a later failed attempt
         p = self.path(namespace, key_hash(key))
@@ -149,7 +169,9 @@ class _Session:
         if err:
             self.runlog().count("replay_recorded_errors")
             raise RecordedError(
-                f"replay: recorded failure ({err.get('type')}): {err.get('message')}"
+                f"replay: recorded failure ({err.get('type')}): {err.get('message')}",
+                err_type=err.get("type"),
+                original=err.get("message"),
             )
         return rec["body"]
 

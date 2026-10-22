@@ -180,3 +180,176 @@ def test_usaspending_award_registers_gov_id(store, tmp_path, monkeypatch):
     a = us.award("CONT_AWD_1")
     rec = store.get(a["source_id"])
     assert rec.tier == 1 and rec.gov_id == "CONT_AWD_1" and rec.type == "api:usaspending"
+
+
+@respx.mock
+def test_usaspending_retries_a_transient_503_and_counts_it(store, tmp_path, monkeypatch):
+    """One 503 from USAspending used to make the whole of section 4 'unavailable'."""
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(USAspendingClient, "BACKOFF_S", (0.0, 0.0, 0.0, 0.0))
+    route = respx.get("https://api.usaspending.gov/api/v2/awards/CONT_AWD_9/").mock(
+        side_effect=[
+            Response(503, text="busy"),
+            Response(502, text="bad gateway"),
+            Response(200, json={"piid": "N00019-26-C-0001", "description": "B-21 LRIP"}),
+        ]
+    )
+    log = RunLog(tmp_path)
+    us = USAspendingClient(store, runlog=log)
+    a = us.award("CONT_AWD_9")
+    assert a["piid"] == "N00019-26-C-0001" and route.call_count == 3
+    assert log.counters["usaspending_retries"] == 2 and log.counters["usaspending_requests"] == 3
+
+
+@respx.mock
+def test_usaspending_does_not_retry_a_client_error_and_gives_up_after_four_attempts(
+    store, tmp_path, monkeypatch
+):
+    import httpx
+
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(USAspendingClient, "BACKOFF_S", (0.0, 0.0, 0.0, 0.0))
+    nf = respx.get("https://api.usaspending.gov/api/v2/awards/CONT_AWD_404/").mock(
+        return_value=Response(404, text="no such award")
+    )
+    down = respx.get("https://api.usaspending.gov/api/v2/awards/CONT_AWD_DOWN/").mock(
+        return_value=Response(503, text="down")
+    )
+    us = USAspendingClient(store)
+    with pytest.raises(httpx.HTTPStatusError):
+        us.award("CONT_AWD_404")
+    assert nf.call_count == 1  # a 404 is the caller's error: no retry
+    with pytest.raises(httpx.HTTPStatusError):
+        us.award("CONT_AWD_DOWN")
+    assert down.call_count == USAspendingClient.RETRIES  # then the failure is raised, not cached
+
+
+def test_a_replayed_failure_prints_as_the_original_exception_did():
+    from primer.clients.cache import RecordedError
+
+    e = RecordedError(
+        "replay: recorded failure (HTTPStatusError): Server error '503'",
+        err_type="HTTPStatusError",
+        original="Server error '503 Service Unavailable' for url 'https://x.test/a'",
+    )
+    assert (
+        repr(e)
+        == "HTTPStatusError(\"Server error '503 Service Unavailable' for url 'https://x.test/a'\")"
+    )
+    assert str(e) == "Server error '503 Service Unavailable' for url 'https://x.test/a'"
+    # without the original text it behaves as before
+    assert "replay" in str(RecordedError("replay: SAM.gov was not configured"))
+
+
+def _award_rows(prefix: str, amounts: list[int]) -> list[dict]:
+    return [
+        {"generated_internal_id": f"{prefix}{i}", "Award ID": f"{prefix}{i}", "Award Amount": a}
+        for i, a in enumerate(amounts)
+    ]
+
+
+@respx.mock
+def test_usaspending_batches_a_large_recipient_set_and_merges_by_amount(
+    store, tmp_path, monkeypatch
+):
+    """Northrop Grumman resolved to 31 UEIs; one text search over all of them returns a 503."""
+    import json as _json
+
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(USAspendingClient, "BACKOFF_S", (0.0, 0.0, 0.0, 0.0))
+    seen_sizes: list[int] = []
+
+    def respond(request):
+        terms = _json.loads(request.content)["filters"]["recipient_search_text"]
+        seen_sizes.append(len(terms))
+        if len(terms) > 10:
+            return Response(503, text="timeout")
+        base = int(terms[0][1:])  # "U10" -> 10
+        return Response(
+            200,
+            json={
+                "results": _award_rows(f"A{base}-", [base * 1000 + 7, base * 1000 + 3]),
+                "page_metadata": {"hasNext": False},
+            },
+        )
+
+    respx.post("https://api.usaspending.gov/api/v2/search/spending_by_award/").mock(
+        side_effect=respond
+    )
+    terms = [f"U{i}" for i in range(31)]
+    us = USAspendingClient(store)
+    resp = us.spending_by_award(terms, 2021, 2026, limit=5)
+    assert max(seen_sizes) <= USAspendingClient.MAX_TERMS and len(seen_sizes) == 4
+    amounts = [r["Award Amount"] for r in resp["results"]]
+    assert len(amounts) == 5 and amounts == sorted(amounts, reverse=True)
+    assert amounts[0] == 24 * 1000 + 7  # the largest award of the last batch leads the ranking
+    assert resp["page_metadata"]["hasNext"] is True and resp["page_metadata"]["batches"] == 4
+    assert resp["source_id"]
+
+
+@respx.mock
+def test_usaspending_batched_pull_survives_one_failed_batch_and_fails_if_all_fail(
+    store, tmp_path, monkeypatch
+):
+    import json as _json
+
+    import httpx
+
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(USAspendingClient, "BACKOFF_S", (0.0, 0.0, 0.0, 0.0))
+    mode = {"fail_first_batch": True, "fail_all": False}
+
+    def respond(request):
+        terms = _json.loads(request.content)["filters"]["recipient_search_text"]
+        if mode["fail_all"] or (mode["fail_first_batch"] and terms[0] == "U0"):
+            return Response(503, text="timeout")
+        return Response(
+            200,
+            json={"results": _award_rows(terms[0], [100]), "page_metadata": {"hasNext": False}},
+        )
+
+    respx.post("https://api.usaspending.gov/api/v2/search/spending_by_award/").mock(
+        side_effect=respond
+    )
+    terms = [f"U{i}" for i in range(20)]
+    log = RunLog(tmp_path)
+    us = USAspendingClient(store, runlog=log)
+    resp = us.spending_by_award(terms, 2021, 2026, limit=10)
+    assert len(resp["results"]) == 2 and len(resp["batch_errors"]) == 1
+    assert any("batch of 8 UEIs failed" in e for e in log.errors)
+    mode["fail_all"] = True
+    with pytest.raises(httpx.HTTPStatusError):
+        us.spending_by_award([f"V{i}" for i in range(20)], 2021, 2026, limit=10)
+
+
+@respx.mock
+def test_usaspending_category_totals_are_summed_across_batches(store, tmp_path, monkeypatch):
+    import json as _json
+
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(USAspendingClient, "BACKOFF_S", (0.0, 0.0, 0.0, 0.0))
+
+    def respond(request):
+        terms = _json.loads(request.content)["filters"]["recipient_search_text"]
+        if len(terms) > 10:
+            return Response(503, text="timeout")
+        return Response(
+            200,
+            json={
+                "results": [
+                    {"name": "Department of the Navy", "amount": 100.0},
+                    {"name": f"Agency {terms[0]}", "amount": 5.0},
+                ]
+            },
+        )
+
+    respx.post(
+        "https://api.usaspending.gov/api/v2/search/spending_by_category/awarding_subagency/"
+    ).mock(side_effect=respond)
+    us = USAspendingClient(store)
+    resp = us.spending_by_category(
+        "awarding_subagency", [f"U{i}" for i in range(20)], 2025, 2025, limit=2
+    )
+    top = resp["results"][0]
+    assert top["name"] == "Department of the Navy" and top["amount"] == 300.0  # 3 batches x 100
+    assert len(resp["results"]) == 2 and resp["page_metadata"]["batches"] == 3

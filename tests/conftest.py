@@ -430,9 +430,16 @@ def firecrawl_mock(monkeypatch):
 
 
 @pytest.fixture
-def usaspending_mock():
+def usaspending_mock(monkeypatch):
     """Recorded Lockheed responses: name discovery page, UEI-filtered awards, subagency
-    categories for FY2025/FY2026, one award detail. Routed by request body / path."""
+    categories for FY2025/FY2026, one award detail. Routed by request body / path.
+
+    The recorded responses answer the full recipient set whatever the filter says, so request
+    batching (USAspendingClient.MAX_TERMS) is switched off here; it has its own tests in
+    test_clients.py, where the mock honours the filter."""
+    from primer.clients.usaspending import USAspendingClient
+
+    monkeypatch.setattr(USAspendingClient, "MAX_TERMS", 10_000)
     fx = _usaspending_fixtures()
     with respx.mock(assert_all_called=False, assert_all_mocked=True) as router:
 
