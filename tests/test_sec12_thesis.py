@@ -251,13 +251,49 @@ def test_thesis_exhibit_carries_the_answer_line():
         in rows[0]
     )
     assert "Bernstein asked (Q3-2026 call): Is there risk of further charges? [src_0031]" in rows[0]
+    # the list holds only the questions management did not answer: the answered one (Jefferies)
+    # is in the table above with its answer, and repeating it here doubled the section's length
     lines = ex.questions_md.splitlines()
-    assert lines[0].startswith("- Jefferies (Q3-2026 call): How should we think")
-    assert lines[1] == (
-        "  - What management said (Sam Ortiz (Chief Financial Officer)): "
-        "We expect to exit next year at a rate of 42 per month. [src_0031]"
+    assert lines == ["- Bernstein (Q3-2026 call): Is there risk of further charges? [src_0031]"]
+    assert "Jefferies" not in ex.questions_md
+
+
+def test_deflected_questions_stay_in_the_unanswered_list():
+    from primer.sections.exhibits_sec12 import is_deflection
+
+    assert is_deflection(None) and is_deflection("Thanks, Alex.")
+    assert is_deflection(
+        "It is too early to say, and we will come back to that when we have more clarity "
+        "on the award timing later this year, so please bear with us."
     )
-    assert lines[2].startswith("- Bernstein (Q3-2026 call):") and len(lines) == 3
+    assert not is_deflection(
+        "We expect to exit next year at a rate of 42 per month, up from 38 today, "
+        "and the supplier constraints have eased on the two gating parts."
+    )
+    d = Debate(
+        firm="Jefferies",
+        analyst="Alex Rivera",
+        question="Will you resume the buyback?",
+        quarter="Q3-2026",
+        source_id="src_0031",
+        lean="open",
+        answer="It is too early to say; we will update you in the new year as the plan firms up.",
+        answered_by="Sam Ortiz (Chief Financial Officer)",
+    )
+    ex = thesis_exhibit(
+        debates=[d],
+        rating=[],
+        rating_claims=[],
+        news=[],
+        company=[],
+        rating_count=None,
+        rating_sid=None,
+    )
+    assert ex.questions_md.splitlines()[0].startswith("- Jefferies (Q3-2026 call): Will you resume")
+    assert (
+        "Management deferred (Sam Ortiz (Chief Financial Officer)): It is too early"
+        in ex.questions_md
+    )
 
 
 def test_page_points_name_the_firm_only_from_the_page():
@@ -310,7 +346,7 @@ def test_section12_with_firecrawl(edgar_mock, firecrawl_mock, output_dir):
     assert check_attribution({12: md}, store)["ok"]
     cells = [c for ln in md.splitlines() if ln.startswith("|") for c in ln.split("|")[1:-1]]
     bullets = [ln for ln in md.splitlines() if ln.startswith("- ")]
-    for firm in ("Melius Research", "Morgan Stanley", "Bernstein", "RBC Capital"):
+    for firm in ("Morgan Stanley", "Bernstein", "RBC Capital"):
         named = [c for c in cells + bullets if firm in c]
         assert named, firm
         for c in named:
@@ -326,17 +362,14 @@ def test_section12_with_firecrawl(edgar_mock, firecrawl_mock, output_dir):
     assert not any("Melius Research" in c for c in cells)
     # questions carry the firm and the transcript citation, and the management answer that
     # follows each in the same transcript sits under it, cited to the same id
-    assert "- Melius Research (Q2-2026 call): Can you talk about the F-35 Lot 20" in md
+    # answered questions are not repeated in the unanswered list; they carry their answer in the
+    # narrative and the table
+    assert "- Melius Research (Q2-2026 call)" not in md
+    assert "Can you talk about the F-35 Lot 20" in md
     assert f"[{transcript_sid}]" in md
     assert "**Analyst questions and what management said" in md
-    assert (
-        "  - What management said (Evan Scott (Chief Financial Officer)): We expect to reach 650 in "
-        f"2027 and 750 by 2028, Kristine, with the investments already in the capex plan. [{transcript_sid}]"
-    ) in md
-    assert (
-        "What management said (James Taiclet (Chairman, President and Chief Executive Officer))"
-        in md
-    )
+    assert "We expect to reach 650 in 2027 and 750 by 2028, Kristine" in md
+    assert "Taiclet" in md  # the answered Melius question is reported with its answer
     # the bull/bear table carries the answer line with the question it answers
     assert any(
         "Morgan Stanley asked (Q2-2026 call): On PAC-3 capacity" in c

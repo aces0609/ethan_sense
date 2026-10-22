@@ -156,11 +156,27 @@ def _is_company_person(name: str, sections_md: dict[int, str]) -> bool:
     )
 
 
+# a sentence ends at . ! ? followed by space, but not after a single capital initial ("L.") or
+# the "U.S." style, which cut "CFO Kenneth L. Bedingfield said ..." in two on 2026-10-22
+_SENTENCE_END = re.compile(r"(?<=[.!?])(?<!\b[A-Z]\.)\s+")
+
+
+def _attribution_units(md: str):
+    """(sentence, citations of its whole line): a bullet or paragraph that cites once at the end
+    covers the sentences before the citation, as the footnote does in the rendered primer."""
+    for line in md.split("\n"):
+        if line.lstrip().startswith((">", "|", "#")):
+            continue  # blockquotes, table rows and headings are not attributions
+        line_sids = re.findall(r"\[(src_\d{4})\]", line)
+        for sentence in _SENTENCE_END.split(line):
+            yield sentence, line_sids
+
+
 def check_attribution(sections_md: dict[int, str], store: EvidenceStore) -> dict:
     """'Firm notes/argues…' must cite a source whose text names that firm."""
     problems = []
     for sec, md in sections_md.items():
-        for sentence in re.split(r"(?<=[.!?])\s+|\n", md):
+        for sentence, line_sids in _attribution_units(md):
             if sentence.lstrip().startswith((">", "|", "#")):
                 continue  # blockquotes, table rows and headings are not attributions
             m = ATTRIBUTION.search(sentence)
@@ -171,7 +187,7 @@ def check_attribution(sections_md: dict[int, str], store: EvidenceStore) -> dict
                 continue
             if _is_company_person(firm, sections_md):
                 continue  # an officer quoted by name is management speaking, not a broker view
-            sids = re.findall(r"\[(src_\d{4})\]", sentence)
+            sids = re.findall(r"\[(src_\d{4})\]", sentence) or line_sids
             if not sids:
                 problems.append(
                     {
@@ -186,7 +202,7 @@ def check_attribution(sections_md: dict[int, str], store: EvidenceStore) -> dict
             # surname, since the source names the person, not the title phrase
             probe = firm.lower()
             if re.search(
-                r"\b(vice president|president|analyst|director|managing|senior|chief|officer|partner)\b",
+                r"\b(vice president|president|analyst|director|managing|senior|chief|officer|partner|cfo|ceo|coo|cto|chairman|chair)\b",
                 probe,
             ):
                 probe = firm.split()[-1].lower()

@@ -8,8 +8,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+# A heading may sit in a table cell ("| ITEM 1. | BUSINESS."), which html_to_text renders with
+# leading and inner pipes; L3Harris's 10-K is laid out that way, and the chunker found only
+# "Item 16" in it (section 3 then had no Item 1). Pipes are skipped before the heading and
+# stripped from the title.
 ITEM_RE = re.compile(
-    r"^\s*(?:#+\s*)?(?:\*\*)?\s*(ITEM|Item)\s+(\d{1,2}[A-C]?)\s*[\.\:\-—–]?\s*(.*?)\s*(?:\*\*)?\s*$",
+    r"^[\s|]*(?:#+\s*)?(?:\*\*)?\s*(ITEM|Item)\s+(\d{1,2}[A-C]?)\s*[\.\:\-—–]?[\s|]*(.*?)\s*(?:\*\*)?[\s|]*$",
     re.MULTILINE,
 )
 

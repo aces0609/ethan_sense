@@ -446,6 +446,22 @@ def company_points(item7: str, sid7: str | None, item1a: str, sid1a: str | None)
 # ---- exhibit --------------------------------------------------------------------------------
 
 
+DEFLECTION = re.compile(
+    r"\b(too early|not going to|won't (?:get ahead|provide|comment|give)|don't want to|"
+    r"we'll (?:update|come back|get back|provide more|talk more)|will provide more detail|"
+    r"in due course|not yet in a position|can't comment|cannot comment|"
+    r"haven't (?:given|provided)|decline[sd]? to)\b",
+    re.I,
+)
+
+
+def is_deflection(answer: str | None) -> bool:
+    """True when the question drew no answer, a one-line reply, or a stated deferral."""
+    if not answer:
+        return True
+    return len(answer.split()) < 12 or bool(DEFLECTION.search(answer))
+
+
 def answer_text(d: Debate) -> str:
     """'What management said (officer as the transcript names them): answer' for a debate."""
     who = d.answered_by or "management"
@@ -489,11 +505,14 @@ def thesis_exhibit(
         r = f"{bear[i].text} [{bear[i].source_id}]" if i < len(bear) else "no sourced item"
         rows.append([b, r])
     md = md_table(["Bull case (sourced)", "Bear case (sourced)"], rows, align_right_from=99)
-    # one question per firm, newest call first, at most eight: the list is an exhibit, not prose
+    # The list holds the questions management did not answer or deferred. Answered questions are
+    # already in the debates narrative and in the table, so repeating them with their answers
+    # here doubled section 12's length (4.1 pages against a 3.75-page limit on 2026-10-22).
+    # One question per firm, newest call first, at most eight.
     seen_firms: set[str] = set()
     picked = []
     for d in debates:
-        if d.firm in seen_firms:
+        if d.firm in seen_firms or not is_deflection(d.answer):
             continue
         seen_firms.add(d.firm)
         picked.append(d)
@@ -503,12 +522,16 @@ def thesis_exhibit(
     for d in picked:
         qlines.append(f"- {d.firm} ({d.quarter} call): {d.question} [{d.source_id}]")
         if d.answer:
-            qlines.append(f"  - {answer_text(d)} [{d.source_id}]")
-    questions_md = (
-        "\n".join(qlines)
-        if qlines
-        else "- no sourced item (no earnings-call transcript was available)"
-    )
+            qlines.append(
+                f"  - Management deferred ({d.answered_by or 'management'}): "
+                f"{_trim_words(d.answer, 40)} [{d.source_id}]"
+            )
+    if qlines:
+        questions_md = "\n".join(qlines)
+    elif debates:
+        questions_md = "- every question quoted above drew an answer on the call (see the table)"
+    else:
+        questions_md = "- no sourced item (no earnings-call transcript was available)"
     claims = list(rating_claims)
     if rating_count is not None and rating_sid:
         c = claim(

@@ -89,3 +89,38 @@ def test_mdx_compiles_and_rejects_jsx(tmp_path):
     bad = tmp_path / "bad.mdx"
     bad.write_text("## 9\n\nSee <https://www.sec.gov/>\n", encoding="utf-8")
     assert check_mdx_compiles(bad)["ok"] is False
+
+
+def test_attribution_check_survives_initials_and_a_citation_at_the_end_of_the_line():
+    """'CFO Kenneth L. Bedingfield said ...' was cut after the middle initial, leaving
+    'Bedingfield said ...' with no citation although the bullet cites at its end."""
+    from datetime import date
+
+    from primer.evidence.store import EvidenceStore
+    from primer.validate.rules import _SENTENCE_END, check_attribution
+
+    assert _SENTENCE_END.split(
+        "CFO Kenneth L. Bedingfield said capex rises. He reaffirmed it."
+    ) == [
+        "CFO Kenneth L. Bedingfield said capex rises.",
+        "He reaffirmed it.",
+    ]
+    assert len(_SENTENCE_END.split("The U.S. Government paid. Next.")) == 2
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        store = EvidenceStore(d, as_of=date(2026, 10, 22))
+        rec = store.register(
+            "Kenneth L. Bedingfield, CFO, said capex would rise to 2.5% of sales.",
+            type="earnings_call",
+            publisher="Yahoo Finance",
+            title="Q3 call",
+            url="https://finance.yahoo.com/call",
+        )
+        sid = rec.source_id
+        cited = f"- CFO Kenneth L. Bedingfield said capex would rise to 2.5% of sales. He reaffirmed guidance.[{sid}]"
+        assert check_attribution({12: cited}, store)["ok"]
+        uncited = "- CFO Kenneth L. Bedingfield said capex would rise to 2.5% of sales. He reaffirmed guidance."
+        res = check_attribution({12: uncited}, store)
+        assert not res["ok"] and res["problems"][0]["reason"] == "no citation"

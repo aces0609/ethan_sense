@@ -55,3 +55,19 @@ def test_chunk_by_item():
     items = [c.item for c in chunks]
     assert items[:3] == ["1", "1A", "2"] and {"7", "8", "10"} <= set(items)
     assert find_chunks(chunks, "cost overruns")[0].item == "1A"
+
+
+def test_chunk_by_item_reads_headings_laid_out_in_table_cells():
+    """L3Harris's 10-K renders headings as '| ITEM 1. | BUSINESS.'; the chunker once found only
+    Item 16 in it, so section 3 had no Item 1 (2026-10-22)."""
+    body = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * 12
+    text = (
+        "| ITEM 1. | BUSINESS. |\n" + body + "\n\n"
+        "| ITEM 1A. | RISK FACTORS. |\n" + body + "\n\n"
+        "| ITEM 7. | MANAGEMENT'S DISCUSSION |\n" + body + "\n\n"
+        "ITEM 8. FINANCIAL STATEMENTS\n" + body + "\n"
+    )
+    chunks = chunk_by_item(text)
+    assert [c.item for c in chunks] == ["1", "1A", "7", "8"]
+    assert chunks[0].title.startswith("BUSINESS") and "|" not in chunks[0].title
+    assert chunks[2].title.startswith("MANAGEMENT")
