@@ -126,3 +126,39 @@ Still open after this pass:
 | `PRIMER_MODEL_PROVIDER` env var overrides `provider` in `config/models.yaml` | The OpenAI balance ran out mid-run; the user supplied an Anthropic key for now but wants OpenAI to remain the configured production path, so the override lives in `.env`, not in config | `src/primer/config.py: active_provider`, `.env.example` |
 | Anthropic temperature unset too | Claude 5.5 models return `temperature is deprecated for this model`; the provider block now carries `temperature: null` like OpenAI, and the models.yaml comment says when to set 0 | `config/models.yaml` |
 | SAM.gov personal key and a fresh Firecrawl key added to `.env` | Unlocks the section 4 CAGE locations table; the first Firecrawl key's free tier was spent on the keyless runs | `.env` (gitignored) |
+
+## 2026-10-22 — Phase 2 gate: final measurement (Anthropic models, SAM.gov, judge rubric)
+
+Provider for this pass: `PRIMER_MODEL_PROVIDER=anthropic` (strong `claude-opus-5-5`, cheap `claude-haiku-5-5`); OpenAI stays the configured production path (commit d3ad926). SAM.gov personal key present; Firecrawl on a fresh free-tier key with pages served from the 7-day cache. The AlphaSense reference primers were extracted to `docs/golden/{lmt,ba}.md` (licensed, gitignored) for the judge and the fact-overlap score.
+
+| Measure | LMT (4e16a602) | BA (0ba2487c) |
+|---|---|---|
+| Wall-clock | 2.8 min | 4.4 min |
+| Model tokens, input / output | 313k / 72k | 422k / 100k |
+| Tokens by role (in + out) | drafter 243k, critic 75k, synthesizer 31k, query planner 20k, planner 17k | drafter 316k, critic 92k, synthesizer 61k, query planner 36k, planner 17k |
+| Model calls | planner 1, query planner 13, drafter 13, critic 13, synthesizer 1 | planner 1, query planner 20, drafter 18, critic 18, synthesizer 2 |
+| Firecrawl credits / cache hits | 8 / 109 | 4 / 136 |
+| SAM.gov calls (cached after the first run) | 10 (one per UEI) | 10 |
+| Coverage full / partial / unavailable | 9 / 4 / 0 | 7 / 6 / 0 |
+| Deterministic critic, min / mean | 4.0 / 4.6 | 3.67 / 4.4 |
+| Judge rubric (Claude Opus vs the AlphaSense section), min / mean | 3.17 / 3.97 | 3.0 / 3.76 |
+| All sections ≥ 3/5 | yes | yes |
+| Fact overlap with the reference (amounts / percentages / names / programs) | 31% / 48% / 7% / 69%, mean 39% | 39% / 23% / 7% / 50%, mean 30% |
+| Section 9 vs golden table | 12 of 12 exact | (no golden table) |
+| Validation gate | passed | passed (re-validated after the attribution stoplist fix; same drafts) |
+| Key Takeaways | 7 of 7 model bullets kept | 7 of 7 kept |
+
+Decisions and notes from this pass:
+
+| # | Decision | Why | Where |
+|---|---|---|---|
+| D2 revised | Per-primer token cap 600k (was 400k); no second critic pass once 70% is spent; synthesizer and judge exempt | A full pass with two critic iterations needs ~450–520k on Claude Opus, which writes longer drafts and critic notes than the OpenAI pass (~340k); at 400k the synthesizer was skipped and two sections kept template digests | `config/budgets.yaml`, `llm.py`, `graph/researcher.py` |
+| SAM.gov registrations by UEI, one call each | Personal keys page at 10 records (the name walk returned 400) and the UEI set is ordered by award total, so ten lookups cover the registrations that matter within the per-primer budget | `clients/samgov.py`, `sections/sec04_programs.py` |
+| GAO findings must be from the last ten years and name the program in the page title | A 1983 F/A-18 report is a government source but not the program's latest finding; the looser fallback had attached the F-35 finding to the F-22 row | `sec04_programs.py: gao_finding` |
+| Rivals without SEC filings stay in the peer list without a ticker | Airbus and BAE are the reference's main Boeing peers; they get "named in the 10-K, no SEC filings" rows and n/a multiples instead of being dropped | `graph/foundation.py: unresolved_peers` |
+| Officer table from the model when no table layout parses | Boeing's proxy lists officers in prose; the cheap model extracts name, age and title from the registered filing text only, cited to that filing | `sec08_governance.py` |
+| Outlook tables need their own heading | Boeing's release has no guidance table; the loose match parsed segment revenue lines as guidance and produced bogus conflicts | `exhibits_sec06.py` |
+
+Fact-overlap caveat: the names family counts every two-word capitalised phrase in the reference (575 for LMT), most of them broker names and headline fragments the public web does not carry, so 7% is the expected floor rather than a defect; amounts, percentages and programs are the comparable families. Judge scores carry `accuracy_vs_reference`, so they are a notch lower than the deterministic critic.
+
+Credits and quota at the end of the pass: Firecrawl 999 → ~975 on the new key (the old key's 1,000 were spent across the keyless and OpenAI passes); SAM.gov 21 of the 30-a-day self-imposed cap.
