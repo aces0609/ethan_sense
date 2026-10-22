@@ -3,14 +3,15 @@
 `chat(role)` returns a LangChain chat model built with init_chat_model from
 config/models.yaml, or None when the role resolves to "template" (no provider key).
 Callers must handle None by using their deterministic template path. Token usage is
-recorded per role in the RunLog.
+recorded per role in the RunLog. The endpoint comes from the active provider's
+base_url_env (OPENAI_BASE_URL / ANTHROPIC_BASE_URL) so a proxy is a .env change.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from primer.config import role_model
+from primer.config import provider_base_url, role_model
 from primer.runlog import RunLog
 
 
@@ -20,7 +21,21 @@ def chat(role: str) -> Any | None:
         return None
     from langchain.chat_models import init_chat_model
 
-    return init_chat_model(model, temperature=temperature)
+    kwargs: dict[str, Any] = {}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    base_url = provider_base_url()
+    if base_url:
+        kwargs["base_url"] = base_url
+    return init_chat_model(model, **kwargs)
+
+
+def _record_usage(resp: Any, role: str, runlog: RunLog | None) -> None:
+    usage = getattr(resp, "usage_metadata", None) or {}
+    if runlog and usage:
+        runlog.add_tokens(
+            role, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))
+        )
 
 
 def invoke_text(role: str, system: str, user: str, runlog: RunLog | None = None) -> str | None:
@@ -31,11 +46,7 @@ def invoke_text(role: str, system: str, user: str, runlog: RunLog | None = None)
     from langchain_core.messages import HumanMessage, SystemMessage
 
     resp = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
-    usage = getattr(resp, "usage_metadata", None) or {}
-    if runlog and usage:
-        runlog.add_tokens(
-            role, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))
-        )
+    _record_usage(resp, role, runlog)
     content = resp.content
     if isinstance(content, list):
         content = "".join(
@@ -55,9 +66,5 @@ def invoke_structured(
     structured = llm.with_structured_output(schema, include_raw=True)
     out = structured.invoke([SystemMessage(content=system), HumanMessage(content=user)])
     raw = out.get("raw") if isinstance(out, dict) else None
-    usage = getattr(raw, "usage_metadata", None) or {}
-    if runlog and usage:
-        runlog.add_tokens(
-            role, int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))
-        )
+    _record_usage(raw, role, runlog)
     return out.get("parsed") if isinstance(out, dict) else out

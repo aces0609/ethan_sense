@@ -20,7 +20,11 @@ import respx
 from httpx import Response
 
 os.environ.setdefault("EDGAR_USER_AGENT", "ethan_sense-tests/0.1 (tests@example.com)")
-os.environ.pop("ANTHROPIC_API_KEY", None)  # tests always exercise the template path
+# Tests always exercise the template path. Set the keys to "" rather than popping them:
+# primer.config calls load_dotenv (override=False) on import, which would restore a popped
+# key from .env, and an empty value is "present" to dotenv but falsy to active_provider().
+for _key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+    os.environ[_key] = ""
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EDGAR_FIXTURES = FIXTURES / "edgar"

@@ -64,19 +64,43 @@ def trade_press(sector_tag: str) -> list[str]:
     return list(tp.get(sector_tag) or tp.get("default") or [])
 
 
+def active_provider() -> dict[str, Any] | None:
+    """The provider block from models.yaml whose key env var is set, or None (template mode)."""
+    cfg = models_config()
+    name = cfg.get("provider")
+    spec = (cfg.get("providers") or {}).get(name)
+    if not spec or not os.environ.get(spec.get("key_env", "")):
+        return None
+    return {"name": name, **spec}
+
+
 def llm_available() -> bool:
-    key_env = models_config().get("provider_key_env", "ANTHROPIC_API_KEY")
-    return bool(os.environ.get(key_env))
+    return active_provider() is not None
 
 
-def role_model(role: str) -> tuple[str, float]:
-    """Return (model string, temperature) for a role. "template" means no LLM."""
+def provider_base_url() -> str | None:
+    """Endpoint for the active provider from its base_url_env; None means the SDK default."""
+    p = active_provider()
+    if not p:
+        return None
+    return os.environ.get(p.get("base_url_env", ""), "").strip() or None
+
+
+def role_model(role: str) -> tuple[str, float | None]:
+    """Return (model string, temperature) for a role. "template" means no LLM.
+
+    A role may name a model directly (`model: provider:name`) or a tier (`tier: strong|cheap`)
+    resolved against the active provider. Temperature None means "leave at the SDK default",
+    which GPT-5-family reasoning models require.
+    """
     roles = models_config().get("roles", {})
     spec = roles.get(role, {})
-    model = spec.get("model", "template")
-    if not llm_available():
-        model = "template"
-    return model, float(spec.get("temperature", 0))
+    provider = active_provider()
+    if provider is None:
+        return "template", None
+    model = spec.get("model") or provider.get(spec.get("tier", "strong"), "template")
+    temperature = spec.get("temperature", provider.get("temperature"))
+    return model, (None if temperature is None else float(temperature))
 
 
 def edgar_user_agent() -> str:

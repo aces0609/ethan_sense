@@ -84,3 +84,12 @@ What the keyless gate does and does not show:
 - The remaining `partial` flags are honest: SAM.gov registrations need `SAM_GOV_API_KEY` (locations are a place-of-performance view cross-checked to 10-K Item 2); EDGAR full-text search returns 403 from this network for every query shape tried (section 7 falls back to the 10-K/10-Q notes and press pages); the small per-section web budgets drop planned queries; Boeing's 10-K has no officer table in the parsed layouts and no outlook table in its release.
 - The judge rubric is the deterministic critic score (`judge: template`). The ≥ 3/5 criterion against the AlphaSense reference, the LLM-planned briefs, the narrative prose and the LLM critic notes are untested until `ANTHROPIC_API_KEY` is set; `primer eval --ticker LMT` then scores each section with the judge model, and the Firecrawl cache makes that rerun free of credits.
 - Credits used in this phase: 1,025 → 580 remaining at the end of the day (foundation probes, four cold runs, debugging runs).
+
+## 2026-10-21 — Model provider switched to OpenAI
+
+| Decision | Why | Where |
+|---|---|---|
+| `config/models.yaml` now has a `provider` switch with per-provider `strong`/`cheap` models and key/endpoint env vars; roles map to a tier | The user supplied an OpenAI key; Anthropic stays configured as the alternative, and a proxy or gateway is a one-line `.env` change via `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` (standard endpoints by default) | `config/models.yaml`, `src/primer/config.py: active_provider, provider_base_url, role_model`, `src/primer/llm.py` |
+| OpenAI models: `gpt-5.4` for strong roles, `gpt-5.4-mini` for cheap roles | Highest-tier general models the key lists; verified with a live call | `config/models.yaml` |
+| Temperature unset for OpenAI roles | GPT-5-family reasoning models reject a non-default temperature; the requirements' determinism target (temperature 0) holds only for the Anthropic provider, so reproducibility rests on logged plans, queries and evidence | `config/models.yaml` comment |
+| Tests blank the provider keys instead of popping them | `primer.config` calls `load_dotenv(override=False)` on import, which restored a popped key from `.env` and sent the whole suite to the live model (one run cost real tokens before this was caught) | `tests/conftest.py` |
