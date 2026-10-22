@@ -93,3 +93,28 @@ What the keyless gate does and does not show:
 | OpenAI models: `gpt-5.4` for strong roles, `gpt-5.4-mini` for cheap roles | Highest-tier general models the key lists; verified with a live call | `config/models.yaml` |
 | Temperature unset for OpenAI roles | GPT-5-family reasoning models reject a non-default temperature; the requirements' determinism target (temperature 0) holds only for the Anthropic provider, so reproducibility rests on logged plans, queries and evidence | `config/models.yaml` comment |
 | Tests blank the provider keys instead of popping them | `primer.config` calls `load_dotenv(override=False)` on import, which restored a popped key from `.env` and sent the whole suite to the live model (one run cost real tokens before this was caught) | `tests/conftest.py` |
+
+## 2026-10-21 — Phase 2 gate measurement (model pass, OpenAI gpt-5.4 / gpt-5.4-mini)
+
+Provider switched to OpenAI in eccfbc8 (the key the user supplied). Firecrawl pages came from the 7-day cache, so these runs spent 2 credits each; USAspending and EDGAR were cached too.
+
+| Measure | LMT, first model run (52aed6df) | LMT, final (98db3eb0) | BA (932c57d4) |
+|---|---|---|---|
+| Wall-clock | 6.5 min | 2.8 min | 1.1 min to the synthesizer, then the OpenAI account ran out of credits; resumed from the checkpoint in 10 s |
+| Model tokens, input / output | 358k / 44k (cap hit, 20 calls skipped incl. the synthesizer) | 308k / 36k | not measured: the crash lost the first process's run.json |
+| Tokens by role | drafter 298k, critic 78k, synthesizer 0 | drafter 222k, critic 59k, synthesizer 40k, query planner 12k, planner 10k | — |
+| Model calls | planner 1, query planner 24, drafter 24, critic 24 | planner 1, query planner 18, drafter 18, critic 18, synthesizer 2 | sections drafted before the quota error; Key Takeaways from the template |
+| Critic mean, min / average | 3.33 / 4.13 (deterministic) | 4.0 / 4.70 | 4.17 / 4.33 (resumed sections only) |
+| Coverage full / partial / unavailable | 7 / 6 / 0 | 9 / 4 / 0 | 9 / 4 / 0 |
+| Validation gate | needs_review (page budget) | passed | passed |
+| Key Takeaways | template (synthesizer skipped at the cap) | 7 of 7 model bullets kept by the claims check | template |
+| Cited sources (tier 1) | — | 94 (63) | 89 (57) |
+
+What changed between the two Lockheed runs (commit e6a9235): the per-primer token cap is enforced per call with the synthesizer exempt and no second critic pass once 70% is spent; the critic's sentence splitter keeps trailing citation tokens and decimals (the first run scored every model sentence as uncited because the citation followed the full stop); quoted company language is not first person and a reported analyst rating is not a recommendation; the drafter honours the cut instruction and caps Perspectives at six bullets; template queries stay first in each brief so the Firecrawl cache serves reruns (the first model run spent 98 credits on planner-written queries).
+
+Still open after this pass:
+
+- The judge rubric against the AlphaSense reference has not run with a model: the OpenAI balance was exhausted before `primer eval`, and the scorecards for both runs say `judge: template` (deterministic critic). The AlphaSense primers are also not on disk (D6), so fact overlap was not measured. `primer eval --run-dir output/LMT/2026-10-21-98db3eb0 --ticker LMT --golden <path to the reference primer>` is the command once credits and the reference exist.
+- Boeing needs one clean model run end to end for its own measurement (about 300k tokens, ~2 credits).
+- Cost per primer in dollars depends on the OpenAI price list for gpt-5.4; at the measured 310k input / 36k output tokens it is well under the $10 target at any plausible rate.
+- A model-call failure now degrades to the template path and disables further calls for the process (`llm_disabled` in run.json) instead of crashing the run.

@@ -14,6 +14,45 @@ from typing import Any
 from primer.config import budgets_config, provider_base_url, role_model
 from primer.runlog import RunLog
 
+_DISABLED: dict[str, str] = {}  # provider circuit breaker: reason once a call failed hard
+
+
+def _disabled(runlog: RunLog | None) -> bool:
+    return bool(_DISABLED)
+
+
+def _call(role: str, runlog: RunLog | None, fn):
+    """Run one model call; a provider error (quota, auth, network) is logged, counted and
+    returned as None so the caller takes the template path. A quota or auth error disables
+    further calls for the process, since every later one would fail the same way."""
+    if _DISABLED:
+        if runlog:
+            runlog.count("llm_calls_skipped_provider_down")
+        return None
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001 - any provider failure degrades, never crashes
+        msg = f"{type(e).__name__}: {str(e)[:300]}"
+        if runlog:
+            runlog.error(f"llm {role}: {msg}")
+            runlog.count("llm_errors")
+        low = msg.lower()
+        if any(
+            k in low
+            for k in (
+                "insufficient_quota",
+                "credit_balance",
+                "no credits",
+                "authentication",
+                "invalid api key",
+                "incorrect api key",
+            )
+        ):
+            _DISABLED["reason"] = msg
+            if runlog:
+                runlog.meta["llm_disabled"] = msg
+        return None
+
 
 def tokens_used(runlog: RunLog | None) -> int:
     if not runlog:
@@ -78,7 +117,13 @@ def invoke_text(role: str, system: str, user: str, runlog: RunLog | None = None)
         runlog.count(f"llm_calls_{role}")
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    resp = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
+    resp = _call(
+        role,
+        runlog,
+        lambda: llm.invoke([SystemMessage(content=system), HumanMessage(content=user)]),
+    )
+    if resp is None:
+        return None
     _record_usage(resp, role, runlog)
     content = resp.content
     if isinstance(content, list):
@@ -101,7 +146,13 @@ def invoke_structured(
     from langchain_core.messages import HumanMessage, SystemMessage
 
     structured = llm.with_structured_output(schema, include_raw=True)
-    out = structured.invoke([SystemMessage(content=system), HumanMessage(content=user)])
+    out = _call(
+        role,
+        runlog,
+        lambda: structured.invoke([SystemMessage(content=system), HumanMessage(content=user)]),
+    )
+    if out is None:
+        return None
     raw = out.get("raw") if isinstance(out, dict) else None
     _record_usage(raw, role, runlog)
     return out.get("parsed") if isinstance(out, dict) else out
