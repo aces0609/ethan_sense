@@ -65,9 +65,13 @@ def trade_press(sector_tag: str) -> list[str]:
 
 
 def active_provider() -> dict[str, Any] | None:
-    """The provider block from models.yaml whose key env var is set, or None (template mode)."""
+    """The provider block from models.yaml whose key env var is set, or None (template mode).
+
+    `PRIMER_MODEL_PROVIDER` in the environment overrides the `provider` in models.yaml, so
+    the config can name the production provider while a developer runs on another.
+    """
     cfg = models_config()
-    name = cfg.get("provider")
+    name = os.environ.get("PRIMER_MODEL_PROVIDER", "").strip() or cfg.get("provider")
     spec = (cfg.get("providers") or {}).get(name)
     if not spec or not os.environ.get(spec.get("key_env", "")):
         return None

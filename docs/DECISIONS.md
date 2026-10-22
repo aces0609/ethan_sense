@@ -118,3 +118,11 @@ Still open after this pass:
 - Boeing needs one clean model run end to end for its own measurement (about 300k tokens, ~2 credits).
 - Cost per primer in dollars depends on the OpenAI price list for gpt-5.4; at the measured 310k input / 36k output tokens it is well under the $10 target at any plausible rate.
 - A model-call failure now degrades to the template path and disables further calls for the process (`llm_disabled` in run.json) instead of crashing the run.
+
+## 2026-10-21 — Anthropic for now, OpenAI stays the production path
+
+| Decision | Why | Where |
+|---|---|---|
+| `PRIMER_MODEL_PROVIDER` env var overrides `provider` in `config/models.yaml` | The OpenAI balance ran out mid-run; the user supplied an Anthropic key for now but wants OpenAI to remain the configured production path, so the override lives in `.env`, not in config | `src/primer/config.py: active_provider`, `.env.example` |
+| Anthropic temperature unset too | Claude 5.5 models return `temperature is deprecated for this model`; the provider block now carries `temperature: null` like OpenAI, and the models.yaml comment says when to set 0 | `config/models.yaml` |
+| SAM.gov personal key and a fresh Firecrawl key added to `.env` | Unlocks the section 4 CAGE locations table; the first Firecrawl key's free tier was spent on the keyless runs | `.env` (gitignored) |

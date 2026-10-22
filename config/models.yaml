@@ -6,11 +6,13 @@
 # Endpoints come from the provider's base_url_env so a proxy or compatible gateway is a
 # one-line .env change; the standard endpoints are the defaults in .env.example.
 #
-# Temperature: Anthropic roles run at 0 (requirements §8 determinism). OpenAI GPT-5-family
-# reasoning models reject a non-default temperature, so it is left unset there and
-# determinism rests on logging the plan and queries in run.json instead.
+# Temperature: both current providers reject an explicit temperature (OpenAI GPT-5-family
+# reasoning models, and Anthropic Claude 5.5 models return "`temperature` is deprecated for
+# this model"), so it is left unset and the requirements §8 determinism target rests on the
+# plan, queries and evidence logged in run.json. Set `temperature: 0` on a provider whose
+# models still accept it.
 
-provider: openai
+provider: openai   # production path; PRIMER_MODEL_PROVIDER in .env overrides locally
 
 providers:
   openai:
@@ -24,7 +26,7 @@ providers:
     base_url_env: ANTHROPIC_BASE_URL
     strong: anthropic:claude-opus-5-5
     cheap: anthropic:claude-haiku-5-5
-    temperature: 0
+    temperature: null
 
 roles:
   planner:        {tier: strong}   # plan_sections
