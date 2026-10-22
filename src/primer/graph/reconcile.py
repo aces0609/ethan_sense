@@ -957,6 +957,28 @@ def apply(
     return out, record
 
 
+def _fact_date(f: Fact, store: Any):
+    """The latest published date among a fact's sources (None when none is dated)."""
+    dates = []
+    for sid in f.source_ids:
+        try:
+            rec = store.get(sid) if store is not None and store.has(sid) else None
+        except Exception:  # noqa: BLE001
+            rec = None
+        if rec is not None and rec.published_date:
+            dates.append(rec.published_date)
+    return max(dates) if dates else None
+
+
+def _historical_officer_pair(a: Fact, b: Fact, store: Any) -> bool:
+    """A CEO/CFO named in a source more than a year older than the other source is a past
+    officer (a 2019 merger release against a 2026 appointment), not a conflict to print."""
+    if a.attribute not in ("ceo", "cfo"):
+        return False
+    da, db = _fact_date(a, store), _fact_date(b, store)
+    return bool(da and db and abs((da - db).days) > 365)
+
+
 def reconcile_drafts(
     drafts: dict[int, dict[str, Any]],
     claims: list[dict[str, Any]],
@@ -996,6 +1018,7 @@ def reconcile_drafts(
             for a, b in extra_c
             if (min(a.section, b.section), max(a.section, b.section), a.attribute) not in have_c
         ]
+    conflicts = [(a, b) for a, b in conflicts if not _historical_officer_pair(a, b, store)]
     changed, record = apply(drafts, matches, conflicts)
     matched_ids = {d.id for d, _ in matches}
     record.update(

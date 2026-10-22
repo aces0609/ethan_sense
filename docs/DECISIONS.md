@@ -254,3 +254,13 @@ Scope decision: the tool is used on defense companies only, so the defense confi
 | The shared recorded-fixture USAspending mock disables batching | It ignores the request filter, so batches would double-count | `tests/conftest.py` |
 
 Known limits after part B: the SAM.gov personal quota was spent by the day's runs (locations come from cache or the place-of-performance view); Northrop's B-21 awards are largely classified, so B-21 appears in prose rather than as a table row; sections 3, 5, 6, 8, 10 and 14 stay `partial` on the free tier of web research; the private path and the ambiguity prompt are tested offline only; `eval-set --run` has not been executed.
+
+## 2026-10-22: L3Harris recency failure (stale officer conflict)
+
+The L3Harris run failed the recency check because reconcile printed a CEO "conflict" in
+section 14 between William Brown (a 2019 merger press release, section 7) and the 2026
+appointments, and the conflict note's citation to the 2019 source counted as section 14
+evidence. Two fixes: a CEO/CFO pair whose sources are more than a year apart is a past
+officer, not a conflict (`_historical_officer_pair`), and `check_recency` ignores the
+`> Conflict:` note, which cites other sections' sources by design. The SpaceX private-path
+rerun is still pending Firecrawl credits (balance 0 until the 2026-11-22 renewal).

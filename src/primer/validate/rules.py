@@ -223,7 +223,11 @@ def check_recency(sections_md: dict[int, str], store: EvidenceStore, as_of: date
     """Section 14 cites nothing older than as_of minus 12 months."""
     cutoff = as_of - timedelta(days=365)
     stale = []
-    md = sections_md.get(14, "")
+    # a "> Conflict:" note cites the other section's sources by design; those are not section
+    # 14's own evidence
+    md = chr(10).join(
+        ln for ln in sections_md.get(14, "").splitlines() if not ln.startswith("> Conflict:")
+    )
     for sid in sorted(set(re.findall(r"\[(src_\d{4})\]", md))):
         rec = store.get(sid) if store.has(sid) else None
         if rec and rec.published_date and rec.published_date < cutoff:
