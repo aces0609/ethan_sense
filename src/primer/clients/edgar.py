@@ -7,9 +7,17 @@ Annual-fact selection (requirements §6 row 9 "common failure"):
 - Only facts from annual forms (10-K and variants) count.
 - Duration concepts: the period must be 350-380 days (a full fiscal year), which drops
   cumulative and quarterly values that share the same end date.
-- Instant concepts: the end date must land on the fiscal-year-end month/day.
-- Fiscal-year label = year of the period end, except that a fiscal year ending in
-  January or February is labelled with the prior calendar year.
+- The fiscal calendar comes from the facts, never from EDGAR's declared `fiscalYearEnd`
+  (it is wrong for some filers: "1231" for CACI, whose year ends in June). The annual
+  period ends are the ends of the 350-380 day duration facts in annual forms. Each period
+  end is labelled with the filing's own `fy` (DocumentFiscalYearFocus): the filing's
+  current period (its latest annual end) carries that `fy`, a comparative period carries
+  `fy - round(years back)`. That follows each company's own naming (L3Harris's year ended
+  2026-01-02 is FY2025, CACI's year ended 2025-06-30 is FY2025). Only a filing with no
+  usable `fy` falls back to the month rule (`fiscal_year_label`).
+- Instant concepts: the end date must be within 7 days of an annual period end (52/53-week
+  years drift) and takes that period's label. Cover-page (dei) facts are dated 0-120 days
+  after a period end and take the label of the latest period end on or before them.
 - When several filings report the same period (the FY2024 10-K and the FY2025 10-K both
   carry FY2024), the most recently filed wins and any earlier differing value is
   recorded as `restated_from`.
@@ -18,6 +26,8 @@ Annual-fact selection (requirements §6 row 9 "common failure"):
 from __future__ import annotations
 
 import re
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -71,6 +81,7 @@ class FactValue:
     filed: date
     frame: str | None = None
     restated_from: dict[str, Any] | None = None
+    note: str | None = None  # a repair applied to the filed fact (see _repair_short_annual)
 
     @property
     def filing_index_url(self) -> str:
@@ -86,6 +97,16 @@ class AnnualFinancials:
     derived: dict[str, dict[int, float]] = field(default_factory=dict)
     missing: dict[str, list[int]] = field(default_factory=dict)
     accessions: dict[str, dict[str, Any]] = field(default_factory=dict)  # accn -> {form, filed, fy}
+    fiscal_year_ends: dict[int, date] = field(default_factory=dict)  # fy label -> period end
+    fiscal_year_end_date: date | None = None  # latest annual period end in the window
+
+    @property
+    def fiscal_year_end_phrase(self) -> str:
+        """For captions: 'fiscal years ending 12/31' or, when the period ends drift
+        (52/53-week years), '52/53-week fiscal years, latest ending 2026-01-02'."""
+        if self.fiscal_year_end.startswith("52/53") and self.fiscal_year_end_date:
+            return f"52/53-week fiscal years, latest ending {self.fiscal_year_end_date.isoformat()}"
+        return f"fiscal years ending {self.fiscal_year_end}"
 
     def value(self, metric: str, fy: int) -> float | None:
         fv = self.facts.get(metric, {}).get(fy)
@@ -264,14 +285,25 @@ class EdgarClient:
         fiscal_years: int | None = None,
         as_of: date | None = None,
     ) -> AnnualFinancials:
+        """Four fiscal years of the concepts in config/concepts.yaml. The fiscal calendar is
+        read from the facts (see the module docstring); `fiscal_year_end` (else EDGAR's
+        declared value) only supplies the month rule for a filing that carries no `fy`."""
         cfg = concepts_config()
         facts = self.companyfacts(cik)
-        fye = fiscal_year_end or self._fye_from_submissions(cik) or "1231"
         n_years = fiscal_years or int(cfg.get("fiscal_years", 4))
         annual_forms = set(cfg.get("annual_forms", ["10-K"]))
         as_of = as_of or date.today()
+        declared: list[str] = []
 
-        result = AnnualFinancials(cik=pad_cik(cik), fiscal_year_end=fye, fiscal_years=[])
+        def fallback_month() -> int:
+            if not declared:
+                declared.append(fiscal_year_end or self._fye_from_submissions(cik) or "1231")
+            return int(declared[0][:2])
+
+        calendar = build_fiscal_calendar(facts, annual_forms, as_of, fallback_month)
+        result = AnnualFinancials(
+            cik=pad_cik(cik), fiscal_year_end=_declared_mmdd(fiscal_year_end), fiscal_years=[]
+        )
         all_fys: set[int] = set()
 
         for _stmt, metrics in cfg["statements"].items():
@@ -280,7 +312,7 @@ class EdgarClient:
                 for concept in spec.get("concepts", []):
                     taxonomy = spec.get("taxonomy", "us-gaap")
                     picks = self._select_annual(
-                        facts, taxonomy, concept, spec["kind"], fye, annual_forms, as_of
+                        facts, taxonomy, concept, spec["kind"], calendar, annual_forms, as_of
                     )
                     # fallback concepts only fill years the earlier concepts did not cover
                     for fy, fv in picks.items():
@@ -301,6 +333,7 @@ class EdgarClient:
             result.facts[metric] = {fy: fv for fy, fv in result.facts[metric].items() if fy in keep}
             if not result.facts[metric]:
                 del result.facts[metric]
+        _set_fiscal_year_end(result)
         for chosen in result.facts.values():
             for fv in chosen.values():
                 result.accessions.setdefault(
@@ -333,6 +366,19 @@ class EdgarClient:
                     result.missing[metric] = missing
         return result
 
+    def fiscal_calendar(
+        self, cik: str, as_of: date | None = None, fallback_fye: str | None = None
+    ) -> FiscalCalendar:
+        """The annual period ends of a filer and their fiscal-year labels (companyfacts)."""
+        cfg = concepts_config()
+        month = int(fallback_fye[:2]) if fallback_fye and len(fallback_fye) == 4 else 12
+        return build_fiscal_calendar(
+            self.companyfacts(cik),
+            set(cfg.get("annual_forms", ["10-K"])),
+            as_of or date.today(),
+            lambda: month,
+        )
+
     def _fye_from_submissions(self, cik: str) -> str | None:
         try:
             return self.submissions(cik).get("fiscalYearEnd") or None
@@ -345,18 +391,24 @@ class EdgarClient:
         taxonomy: str,
         concept: str,
         kind: str,
-        fye: str,
+        calendar: FiscalCalendar,
         annual_forms: set[str],
         as_of: date,
     ) -> dict[int, FactValue]:
         node = facts.get("facts", {}).get(taxonomy, {}).get(concept)
         if not node:
             return {}
-        fye_month, fye_day = int(fye[:2]), int(fye[2:])
         by_period: dict[date, list[tuple[dict[str, Any], str]]] = {}
+        short_annual: list[tuple[dict[str, Any], str]] = []  # 80-100 day facts in annual forms
+        nine_month: list[tuple[dict[str, Any], str]] = []  # 10-Q year-to-date facts
         for unit, entries in node.get("units", {}).items():
             for e in entries:
-                if e.get("form") not in annual_forms:
+                form = e.get("form")
+                if kind == "duration" and form in QUARTERLY_FORMS and e.get("start"):
+                    if 260 <= _days(e) <= 290:
+                        nine_month.append((e, unit))
+                    continue
+                if form not in annual_forms:
                     continue
                 end = date.fromisoformat(e["end"])
                 if end > as_of:
@@ -364,30 +416,33 @@ class EdgarClient:
                 if kind == "duration":
                     if not e.get("start"):
                         continue
-                    start = date.fromisoformat(e["start"])
-                    if not (350 <= (end - start).days <= 380):
+                    days = _days(e)
+                    if 80 <= days <= 100:
+                        short_annual.append((e, unit))
                         continue
+                    if not (350 <= days <= 380):
+                        continue
+                    by_period.setdefault(end, []).append((e, unit))
                 else:
                     if e.get("start"):
                         continue
                     if taxonomy == "dei":
-                        # cover-page facts (shares outstanding) are dated after the FYE;
-                        # accept up to 120 days past a fiscal-year end and label by that FYE
-                        fye_date = _fye_on_or_before(end, fye_month, fye_day)
-                        if not (0 <= (end - fye_date).days <= 120):
-                            continue
-                        period_end = fye_date
+                        # cover-page facts (shares outstanding) are dated after the period
+                        # end; accept 0-120 days past an annual period end and label by it
+                        period_end = calendar.cover_period(end)
                     else:
-                        # balance-sheet instants must sit on the fiscal-year end (a few days of slack)
-                        if abs(end.month - fye_month) > 0 or abs(end.day - fye_day) > 7:
-                            continue
-                        period_end = end
+                        # balance-sheet instants must sit on an annual period end (a few
+                        # days of slack: 52/53-week years end on a different day each year)
+                        period_end = calendar.instant_period(end)
+                    if period_end is None:
+                        continue
                     by_period.setdefault(period_end, []).append((e, unit))
-                    continue
-                by_period.setdefault(end, []).append((e, unit))
+        if kind == "duration":
+            for e, unit in _repair_short_annual(short_annual, nine_month, by_period, calendar):
+                by_period.setdefault(date.fromisoformat(e["end"]), []).append((e, unit))
 
         out: dict[int, FactValue] = {}
-        for end, items in by_period.items():
+        for period_end, items in by_period.items():
             items.sort(key=lambda t: t[0].get("filed", ""), reverse=True)
             latest, unit = items[0]
             restated = None
@@ -399,7 +454,8 @@ class EdgarClient:
                         "filed": older.get("filed"),
                     }
                     break
-            fy = fiscal_year_label(end, fye_month)
+            fy = calendar.label(period_end)
+            end = period_end if taxonomy == "dei" else date.fromisoformat(latest["end"])
             fv = FactValue(
                 metric="",
                 concept=concept,
@@ -415,6 +471,7 @@ class EdgarClient:
                 filed=date.fromisoformat(latest["filed"]),
                 frame=latest.get("frame"),
                 restated_from=restated,
+                note=latest.get("_note"),
             )
             # if two period-ends map to the same FY label (52/53-week years), keep the later
             if fy not in out or out[fy].end < end:
@@ -499,6 +556,8 @@ class EdgarClient:
                 node = facts.get("facts", {}).get(taxonomy, {}).get(concept)
                 if not node:
                     continue
+                k_short: list[tuple[dict[str, Any], str, date, date]] = []
+
                 for unit, entries in node.get("units", {}).items():
                     for e in entries:
                         if not e.get("start") or e.get("form") not in quarterly_forms:
@@ -508,27 +567,25 @@ class EdgarClient:
                             continue
                         days = (end - start).days
                         if 80 <= days <= 100:
-                            prev = rows.get(end)
-                            if prev is None or e.get("filed", "") > prev.filed.isoformat():
-                                rows[end] = FactValue(
-                                    metric=metric,
-                                    concept=concept,
-                                    taxonomy=taxonomy,
-                                    value=float(e["val"]),
-                                    unit=unit,
-                                    fiscal_year=end.year,
-                                    period_label=quarter_label(end),
-                                    start=start,
-                                    end=end,
-                                    accession=e["accn"],
-                                    form=e["form"],
-                                    filed=date.fromisoformat(e["filed"]),
-                                    frame=e.get("frame"),
-                                )
+                            if e["form"].startswith("10-K"):
+                                k_short.append((e, unit, start, end))  # checked below
+                            else:
+                                _put_quarter(rows, metric, taxonomy, concept, e, unit, start, end)
                         elif 260 <= days <= 290 or 350 <= days <= 380:
                             k = (start, end)
                             if k not in ytd or e.get("filed", "") > ytd[k][0].get("filed", ""):
                                 ytd[k] = (e, unit)
+                # a 10-K fact for a quarter-length period is a fourth quarter unless it is a
+                # fiscal-year total tagged with a quarter's period (_repair_short_annual): then
+                # it is the fiscal year, from which Q4 is derived below
+                for e, unit, start, end in k_short:
+                    y_start = _nine_month_start(e, unit, ytd)
+                    if y_start is not None:
+                        k = (y_start, end)
+                        if k not in ytd or e.get("filed", "") > ytd[k][0].get("filed", ""):
+                            ytd[k] = (e, unit)
+                    else:
+                        _put_quarter(rows, metric, taxonomy, concept, e, unit, start, end)
                 if rows:
                     break
             # derive Q4 = FY - nine-month YTD where both share a start date (additive flows only)
@@ -550,7 +607,7 @@ class EdgarClient:
                         taxonomy="derived",
                         value=float(e["val"]) - float(e9d["val"]),
                         unit=unit,
-                        fiscal_year=end.year,
+                        fiscal_year=int(quarter_label(end).split("-")[1]),
                         period_label=quarter_label(end),
                         start=e9 + timedelta(days=1),
                         end=end,
@@ -593,27 +650,259 @@ class EdgarClient:
 GATE_YEAR_METRICS = ("revenue", "net_income", "operating_cash_flow", "capex", "operating_income")
 
 
+def _default_month() -> int:
+    return 12
+
+
 def quarter_label(end: date) -> str:
-    """Calendar-quarter label by period end, e.g. 2026-06-30 -> Q2-2026. A 52/53-week quarter
-    that spills a few days into the next month (2026-07-03) still labels the quarter it closes."""
-    if end.day <= 7 and end.month in (1, 4, 7, 10):
-        end = end.replace(day=1) - timedelta(days=1)
-    return f"Q{(end.month - 1) // 3 + 1}-{end.year}"
+    """Calendar-quarter label of a quarter end: the standard quarter end (Mar 31, Jun 30,
+    Sep 30, Dec 31) nearest to it, e.g. 2026-06-30 -> Q2-2026. That absorbs the few days a
+    52/53-week quarter drifts either way (2026-01-02 -> Q4-2025, 2025-03-28 -> Q1-2025) and
+    matches `quarter_label_for_release` (the last standard quarter end before the release)
+    for filers whose quarters end a month off (a 2026-01-30 quarter -> Q4-2025)."""
+    ends = [
+        date(y, m, d)
+        for y in (end.year - 1, end.year, end.year + 1)
+        for m, d in ((3, 31), (6, 30), (9, 30), (12, 31))
+    ]
+    nearest = min(ends, key=lambda q: (abs((q - end).days), q))
+    return f"Q{(nearest.month - 1) // 3 + 1}-{nearest.year}"
 
 
 def fiscal_year_label(end: date, fye_month: int) -> int:
+    """Month rule: a fiscal year ending in January or February is labelled with the prior
+    calendar year. A fallback only (see FiscalCalendar): it needs the declared year-end month,
+    which EDGAR gets wrong for some filers, and it mislabels a December 52/53-week year end
+    for a filer whose declared month is January."""
     if fye_month <= 2:
         return end.year - 1
     return end.year
 
 
-def _fye_on_or_before(d: date, fye_month: int, fye_day: int) -> date:
-    """The most recent fiscal-year-end date on or before d."""
-    day = min(fye_day, 28) if fye_month == 2 else fye_day
-    candidate = date(d.year, fye_month, day)
-    if candidate > d:
-        candidate = date(d.year - 1, fye_month, day)
-    return candidate
+QUARTERLY_FORMS = ("10-Q", "10-Q/A")
+
+
+def _days(e: dict[str, Any]) -> int:
+    return (date.fromisoformat(e["end"]) - date.fromisoformat(e["start"])).days
+
+
+@dataclass
+class FiscalCalendar:
+    """Annual period ends and their fiscal-year labels, derived from the facts themselves.
+
+    `labels` maps each annual period end (the end of a 350-380 day duration fact in an
+    annual form) to a fiscal-year label taken from the filing's own `fy`. Nothing here reads
+    EDGAR's declared fiscalYearEnd; `fallback_month` is only called for a filing that has no
+    usable `fy`."""
+
+    labels: dict[date, int] = field(default_factory=dict)
+    fallback_month: Callable[[], int] = _default_month
+
+    @property
+    def ends(self) -> list[date]:
+        return sorted(self.labels)
+
+    def label(self, period_end: date) -> int:
+        fy = self.labels.get(period_end)
+        return fy if fy is not None else fiscal_year_label(period_end, self.fallback_month())
+
+    def instant_period(self, end: date) -> date | None:
+        """The annual period end within 7 days of a balance-sheet instant (the nearest)."""
+        best = min(self.labels, key=lambda pe: abs((pe - end).days), default=None)
+        if best is not None and abs((best - end).days) <= 7:
+            return best
+        return None
+
+    def cover_period(self, end: date) -> date | None:
+        """The latest annual period end on or before a cover-page date, if it is 0-120 days
+        earlier (the cover date of a 10-K follows the fiscal year end)."""
+        prior = [pe for pe in self.labels if pe <= end]
+        if not prior:
+            return None
+        pe = max(prior)
+        return pe if (end - pe).days <= 120 else None
+
+
+def build_fiscal_calendar(
+    facts: dict[str, Any],
+    annual_forms: set[str] | tuple[str, ...],
+    as_of: date,
+    fallback_month: Callable[[], int] = _default_month,
+) -> FiscalCalendar:
+    """Label every annual period end in companyfacts with the fiscal year its filing calls it.
+
+    Per annual-form accession: `fy` (DocumentFiscalYearFocus, stamped on every fact of the
+    filing) is the label of the filing's current period, its latest annual end; a comparative
+    period is labelled `fy - round(years back)`. A `fy` that is not the current period end's
+    year or the year before (a mis-tagged filing) is ignored and that accession's ends take the
+    month rule instead. When accessions disagree about a period end, the filing in which it is
+    the current period wins, then the later filing."""
+    forms = set(annual_forms)
+    per_accn: dict[str, dict[str, Any]] = {}
+    for concepts in facts.get("facts", {}).values():
+        for node in concepts.values():
+            for entries in node.get("units", {}).values():
+                for e in entries:
+                    if e.get("form") not in forms or not e.get("start") or not e.get("accn"):
+                        continue
+                    if not 350 <= _days(e) <= 380:
+                        continue
+                    end = date.fromisoformat(e["end"])
+                    if end > as_of or e["end"] > e.get("filed", "9999"):
+                        continue  # a period cannot end after the filing that reports it
+                    info = per_accn.setdefault(
+                        e["accn"], {"fy": Counter(), "filed": e.get("filed", ""), "ends": Counter()}
+                    )
+                    info["ends"][end] += 1
+                    if isinstance(e.get("fy"), int):
+                        info["fy"][e["fy"]] += 1
+    candidates: dict[date, list[tuple[tuple[int, bool, str], int]]] = {}
+    for info in per_accn.values():
+        ends: Counter[date] = info["ends"]
+        top = max(ends.values())
+        current = max(end for end, n in ends.items() if n >= top / 2)
+        fy = info["fy"].most_common(1)[0][0] if info["fy"] else None
+        usable = fy is not None and current.year - 1 <= fy <= current.year
+        for end in ends:
+            if usable:
+                label = fy - round((current - end).days / 365.25)
+                rank = (1, end == current, info["filed"])
+            else:
+                label = fiscal_year_label(end, fallback_month())
+                rank = (0, False, info["filed"])
+            candidates.setdefault(end, []).append((rank, label))
+    return FiscalCalendar(
+        labels={end: max(c)[1] for end, c in candidates.items()}, fallback_month=fallback_month
+    )
+
+
+def _repair_short_annual(
+    short_annual: list[tuple[dict[str, Any], str]],
+    nine_month: list[tuple[dict[str, Any], str]],
+    by_period: dict[date, list[tuple[dict[str, Any], str]]],
+    calendar: FiscalCalendar,
+) -> list[tuple[dict[str, Any], str]]:
+    """Fiscal-year values a filer tagged with a quarter-length period.
+
+    L3Harris's FY2025 10-K carries revenue of $21,865m for 2025-10-04..2026-01-02 (91 days)
+    and no 350-380 day revenue fact, although the figure is the whole year. A 10-K fact that
+    starts the day after a 10-Q nine-month year-to-date period ends, ends on an annual period
+    end that the concept has no annual-length fact for, and is at least as large as that
+    year-to-date value (same sign) cannot be the fourth quarter: it is taken as the fiscal-year
+    value, with the year-to-date start and a `note`. Without a 10-Q year-to-date fact in
+    companyfacts nothing is repaired."""
+    out: list[tuple[dict[str, Any], str]] = []
+    for e, unit in short_annual:
+        end = date.fromisoformat(e["end"])
+        if end in by_period or end not in calendar.labels:
+            continue
+        start = date.fromisoformat(e["start"])
+        for y, y_unit in nine_month:
+            if y_unit != unit or not 0 <= (start - date.fromisoformat(y["end"])).days <= 5:
+                continue
+            v, yv = float(e["val"]), float(y["val"])
+            if v * yv > 0 and abs(v) >= abs(yv):
+                fixed = dict(e)
+                fixed["start"] = y["start"]
+                fixed["_note"] = (
+                    f"filed with a {_days(e)}-day period starting {e['start']}; taken as the "
+                    f"fiscal year {y['start']} to {e['end']} because it exceeds the nine-month "
+                    f"year-to-date value of {yv:,.0f} (accession {y.get('accn')})"
+                )
+                out.append((fixed, unit))
+                break
+    return out
+
+
+def _put_quarter(
+    rows: dict[date, FactValue],
+    metric: str,
+    taxonomy: str,
+    concept: str,
+    e: dict[str, Any],
+    unit: str,
+    start: date,
+    end: date,
+) -> None:
+    """Record a discrete-quarter fact; the later filing wins for the same period end."""
+    prev = rows.get(end)
+    if prev is None or e.get("filed", "") > prev.filed.isoformat():
+        rows[end] = FactValue(
+            metric=metric,
+            concept=concept,
+            taxonomy=taxonomy,
+            value=float(e["val"]),
+            unit=unit,
+            fiscal_year=int(quarter_label(end).split("-")[1]),
+            period_label=quarter_label(end),
+            start=start,
+            end=end,
+            accession=e["accn"],
+            form=e["form"],
+            filed=date.fromisoformat(e["filed"]),
+            frame=e.get("frame"),
+        )
+
+
+def _nine_month_start(
+    e: dict[str, Any],
+    unit: str,
+    ytd: dict[tuple[date, date], tuple[dict[str, Any], str]],
+) -> date | None:
+    """Start of the fiscal year when `e` (a quarter-length 10-K fact) is really the fiscal-year
+    total: it starts within 5 days after a nine-month year-to-date period ends and is at least
+    as large, same sign (see _repair_short_annual)."""
+    start = date.fromisoformat(e["start"])
+    for (y_start, y_end), (y, y_unit) in ytd.items():
+        if y_unit != unit or not 260 <= (y_end - y_start).days <= 290:
+            continue
+        if not 0 <= (start - y_end).days <= 5:
+            continue
+        v, yv = float(e["val"]), float(y["val"])
+        if v * yv > 0 and abs(v) >= abs(yv):
+            return y_start
+    return None
+
+
+def _declared_mmdd(fye: str | None) -> str:
+    return f"{fye[:2]}/{fye[2:]}" if fye and len(fye) == 4 else "n/a"
+
+
+def _day_gap(a: date, b: date) -> int:
+    """Days between the month/day of a and of b, around the year end."""
+    try:
+        same_year = date(b.year, a.month, a.day)
+    except ValueError:  # Feb 29
+        same_year = date(b.year, a.month, a.day - 1)
+    gap = abs((same_year - b).days)
+    return min(gap, 365 - gap)
+
+
+def _set_fiscal_year_end(result: AnnualFinancials) -> None:
+    """Fill the fiscal-year end the section text prints from the period ends of the years in
+    the window: 'MM/DD' when they sit on the same day (give or take 3), else the 52/53-week
+    wording naming the latest one."""
+    ends: dict[int, date] = {}
+    for fy in result.fiscal_years:
+        for metric in GATE_YEAR_METRICS:
+            fv = result.facts.get(metric, {}).get(fy)
+            if fv is not None:
+                ends[fy] = fv.end
+                break
+    if not ends:
+        return
+    result.fiscal_year_ends = ends
+    result.fiscal_year_end_date = max(ends.values())
+    result.fiscal_year_end = describe_fiscal_year_end(list(ends.values()))
+
+
+def describe_fiscal_year_end(ends: list[date]) -> str:
+    """'MM/DD' of the latest annual period end when the ends sit on the same day (give or
+    take 3 days), else '52/53-week year ending YYYY-MM-DD'."""
+    latest = max(ends)
+    if max(_day_gap(e, latest) for e in ends) > 3:
+        return f"52/53-week year ending {latest.isoformat()}"
+    return f"{latest.month:02d}/{latest.day:02d}"
 
 
 def _eval_formula(formula: str, lookup, optional: tuple[str, ...] = ()) -> float | None:

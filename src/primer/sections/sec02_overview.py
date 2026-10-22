@@ -216,7 +216,8 @@ def draft(
                 "exchange": ctx.entity.exchange,
                 "ticker": ctx.entity.ticker,
                 "state_of_incorporation": ctx.entity.state_of_incorporation,
-                "fiscal_year_end": ctx.entity.fiscal_year_end,
+                "fiscal_year_end": ctx.foundation.get("fiscal_year_end")
+                or ctx.entity.fiscal_year_end,
             },
             "source_ids": [],
         },

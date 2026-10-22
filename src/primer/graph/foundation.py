@@ -24,7 +24,12 @@ from datetime import date
 from typing import Any
 from urllib.parse import urlparse
 
-from primer.clients.edgar import EdgarClient, fiscal_year_label, trailing_months
+from primer.clients.edgar import (
+    EdgarClient,
+    describe_fiscal_year_end,
+    fiscal_year_label,
+    trailing_months,
+)
 from primer.clients.firecrawl import FirecrawlClient, FirecrawlError
 from primer.config import foundation_budget, sources_config
 from primer.evidence.chunking import chunk_by_item
@@ -218,6 +223,7 @@ def build_foundation(state: PrimerState) -> dict[str, Any]:
         "transcripts": {"found": 0, "missed": [], "requested": 0},
         "ir": {},
         "fy": None,
+        "fiscal_year_end": None,
         "gov_revenue": {},
         "peers": [],
     }
@@ -327,9 +333,23 @@ def _filings(edgar, store, ent, as_of, found, runlog) -> None:
     edgar.companyfacts(ent.cik)  # warm the cache once for every researcher
 
     tenk = found["filings"]["10-K"][0] if found["filings"]["10-K"] else None
-    fye_month = int((ent.fiscal_year_end or "1231")[:2])
+    # the fiscal calendar comes from the facts; EDGAR's declared year-end month is only the
+    # fallback for a filing with no fiscal-year tag
+    try:
+        calendar = edgar.fiscal_calendar(ent.cik, as_of, ent.fiscal_year_end)
+    except Exception as e:  # noqa: BLE001 - the label degrades to the month rule
+        runlog.error(f"foundation fiscal calendar: {e!r}")
+        calendar = None
+    if calendar is not None and calendar.ends:
+        found["fiscal_year_end"] = describe_fiscal_year_end(calendar.ends[-4:])
     if tenk and tenk.get("report_date"):
-        found["fy"] = fiscal_year_label(date.fromisoformat(tenk["report_date"]), fye_month)
+        report_date = date.fromisoformat(tenk["report_date"])
+        period_end = calendar.instant_period(report_date) if calendar is not None else None
+        if calendar is not None and period_end is not None:
+            found["fy"] = calendar.label(period_end)
+        else:
+            fye_month = int((ent.fiscal_year_end or "1231")[:2])
+            found["fy"] = fiscal_year_label(report_date, fye_month)
     else:
         found["fy"] = as_of.year - 1
     if found["sources"].get("10-K"):

@@ -15,7 +15,8 @@ import yaml
 from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_DIR = REPO_ROOT / "config"
+DEFAULT_CONFIG_DIR = REPO_ROOT / "config"
+CONFIG_DIR = Path(os.environ.get("PRIMER_CONFIG_DIR") or DEFAULT_CONFIG_DIR)
 
 load_dotenv(REPO_ROOT / ".env")
 
@@ -26,6 +27,18 @@ def load_yaml(name: str) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     return data
+
+
+def use_config_dir(path: str | Path | None) -> Path:
+    """Read config/*.yaml from `path` (a run's config snapshot) instead of the repo's, or back
+    from the repo's when None. Config is an input to a run, so an exact replay must use the
+    config the original run used. Returns the directory now in effect."""
+    global CONFIG_DIR
+    CONFIG_DIR = (
+        Path(path) if path else Path(os.environ.get("PRIMER_CONFIG_DIR") or DEFAULT_CONFIG_DIR)
+    )
+    load_yaml.cache_clear()
+    return CONFIG_DIR
 
 
 def models_config() -> dict[str, Any]:

@@ -11,9 +11,10 @@ outlook rows cited to the release with its date.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
+from primer.clients.edgar import quarter_label
 from primer.sections.common import claim, md_table
 from primer.sections.exhibits import ExhibitResult
 from primer.sections.exhibits_sec13 import Val, fmt_val
@@ -87,13 +88,11 @@ RESULT_LABELS = {
 
 
 def qlabel(end: date) -> str:
-    """Calendar-quarter label of a period end: 2026-06-30 -> Q2-2026. A 52/53-week quarter
-    that ends in the first days of the next calendar quarter belongs to the quarter just
-    ended (2026-01-02 -> Q4-2025). (edgar.quarter_label rounds standard quarter ends up by
-    one quarter, so this module labels XBRL quarterly facts itself.)"""
-    if end.day <= 7 and end.month in (1, 4, 7, 10):
-        end = end.replace(day=1) - timedelta(days=1)
-    return f"Q{(end.month - 1) // 3 + 1}-{end.year}"
+    """Calendar-quarter label of a period end: 2026-06-30 -> Q2-2026. The nearest standard
+    quarter end labels it, so a 52/53-week quarter that ends a few days either side
+    (2026-01-02 -> Q4-2025, 2025-03-28 -> Q1-2025) keeps the quarter it closes. One rule
+    with the XBRL quarterly facts: it is `edgar.quarter_label`."""
+    return quarter_label(end)
 
 
 def norm_quarter(s: str | None) -> str | None:

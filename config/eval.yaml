@@ -18,8 +18,8 @@
 #   note        free text carried into the report
 #   expect      checks on the finished run (all must hold):
 #                 section<N>: coverage status, or a list of acceptable statuses
-#                 fiscal_year_end: "0926"        entity fiscal year end (MMDD, quote it)
-#                 sector_tag: technology         tag resolve_entity assigned from the SIC code
+#                 fiscal_year_end: "1231"        entity fiscal year end (MMDD, quote it)
+#                 sector_tag: aerospace_defense  tag resolve_entity assigned from the SIC code
 #                 is_public: true|false
 #                 gate: pass|fail                the validation gate
 #                 self_consistency: pass|fail    balance-sheet / FCF / revenue / FY-label checks
@@ -82,29 +82,34 @@ entries:
       section11: [partial, unavailable]
       section13: [partial, unavailable]
 
-  - name: Apple
-    ticker: AAPL
+  - name: Northrop Grumman
+    ticker: NOC
     kind: rubric
     flags: {}
-    sector: technology
-    note: September fiscal year end; no disclosed US-government revenue, so section 4 is not applicable.
+    as_of: "2026-10-22"
+    sector: aerospace_defense
+    note: >-
+      The requirements' open question for the Key Programs section: Sentinel and B-21 are the
+      newest and least-tested part of section 4. No reference primer exists, so the judge scores
+      against the cited sources and the rubric.
     expect:
-      sector_tag: technology
-      fiscal_year_end: "0926"
-      section4: not_applicable
+      sector_tag: aerospace_defense
+      fiscal_year_end: "1231"
+      section4: [full, partial]
       section9: full
       self_consistency: pass
 
-  - name: Pfizer
-    ticker: PFE
+  - name: L3Harris Technologies
+    ticker: LHX
     kind: rubric
     flags: {}
-    sector: pharma_biotech
-    note: December fiscal year end; acquisition-heavy, with some US-government contracts.
+    as_of: "2026-10-22"
+    sector: aerospace_defense
+    note: >-
+      52/53-week fiscal year ending on the Friday nearest 31 December (2022-12-30, 2023-12-29,
+      2025-01-03, 2026-01-02): the fiscal-year labelling and balance-sheet dating test. Four
+      consecutive fiscal years, FY2022 to FY2025, must come out with revenue in each.
     expect:
-      sector_tag: pharma_biotech
-      fiscal_year_end: "1231"
-      section4: [full, partial]
-      section7: [full, partial]
+      sector_tag: aerospace_defense
       section9: full
       self_consistency: pass

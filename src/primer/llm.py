@@ -124,13 +124,53 @@ def llm_key(role: str, system: str, user: str, schema_name: str = "") -> str:
     return h.hexdigest()
 
 
+def _dump_miss(role: str, key: str, system: str, user: str) -> None:
+    """On a replay miss write the full missed prompt, and a unified diff against the closest
+    recorded prompt of the same role (recordings keep their prompt), to
+    `{replay run}/replay_misses/` so the cause of the divergence can be read, not guessed."""
+    import difflib
+    import json
+
+    sess = _rec.session()
+    if sess is None:
+        return
+    try:
+        out = sess.log_dir / "replay_misses"
+        out.mkdir(parents=True, exist_ok=True)
+        text = "\n".join(
+            [f"ROLE: {role}", f"KEY: {key}", "", "--- SYSTEM ---", system, "", "--- USER ---", user]
+        )
+        (out / f"{role}-{key[:12]}.txt").write_text(text, encoding="utf-8")
+        best, best_ratio = None, 0.0
+        for f in (sess.run_dir / "replay" / "llm").glob("*.json"):
+            try:
+                rec = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            body = rec.get("body", rec)
+            pr = body.get("prompt") if isinstance(body, dict) else None
+            if not pr or body.get("role") != role:
+                continue
+            r = difflib.SequenceMatcher(None, user[:6000], pr["user"][:6000]).quick_ratio()
+            if r > best_ratio:
+                best, best_ratio = pr, r
+        if best is not None:
+            a = best["user"].splitlines()
+            b = user.splitlines()
+            diff = list(difflib.unified_diff(a, b, "recorded", "replayed", n=1, lineterm=""))[:400]
+            (out / f"{role}-{key[:12]}.diff").write_text("\n".join(diff), encoding="utf-8")
+    except Exception:  # noqa: BLE001 - diagnostics must never break a replay
+        pass
+
+
 def _replayed(
-    role: str, key: str, runlog: RunLog | None, hint: str = ""
+    role: str, key: str, runlog: RunLog | None, system: str = "", user: str = ""
 ) -> tuple[bool, dict[str, Any]]:
     """(found, record) for a replay lookup; a missing entry is counted and returns (False, {})."""
     rec = _rec.replay_json("llm", key)
     if rec is None:
-        _rec.count_llm_miss(f"{role} {key[:12]} {hint[:100]!r}")
+        _rec.count_llm_miss(f"{role} {key[:12]} {user[:100]!r}")
+        _dump_miss(role, key, system, user)
         return False, {}
     if runlog:
         runlog.count("replay_llm_hits")
@@ -142,10 +182,14 @@ def invoke_text(role: str, system: str, user: str, runlog: RunLog | None = None)
     per-primer token cap is spent."""
     key = llm_key(role, system, user)
     if _rec.mode() == "replay":
-        found, rec = _replayed(role, key, runlog, user)
+        found, rec = _replayed(role, key, runlog, system, user)
         return rec.get("text") if found and not rec.get("none") else None
     text = _invoke_text(role, system, user, runlog)
-    payload: dict[str, Any] = {"role": role, "kind": "text"}
+    payload: dict[str, Any] = {
+        "role": role,
+        "kind": "text",
+        "prompt": {"system": system, "user": user},
+    }
     payload.update({"text": text} if text is not None else {"none": True})
     _rec.record_json("llm", key, payload)
     return text
@@ -182,7 +226,7 @@ def invoke_structured(
 ):
     key = llm_key(role, system, user, getattr(schema, "__name__", str(schema)))
     if _rec.mode() == "replay":
-        found, rec = _replayed(role, key, runlog, user)
+        found, rec = _replayed(role, key, runlog, system, user)
         if not found or rec.get("none"):
             return None
         try:
@@ -196,6 +240,7 @@ def invoke_structured(
         "role": role,
         "kind": "structured",
         "schema": getattr(schema, "__name__", ""),
+        "prompt": {"system": system, "user": user},
     }
     if parsed is None:
         payload["none"] = True

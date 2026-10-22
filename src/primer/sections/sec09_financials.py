@@ -172,10 +172,9 @@ def draft(
 
 
 def _caveat(entity: Entity, fin: AnnualFinancials) -> str:
-    fye = f"{fin.fiscal_year_end[:2]}/{fin.fiscal_year_end[2:]}"
     span = f"FY{fin.fiscal_years[0]}–FY{fin.fiscal_years[-1]}"
     return (
-        f"*Caveat: figures are GAAP as reported in SEC XBRL filings for {span} (fiscal year ends {fye}); "
+        f"*Caveat: figures are GAAP as reported in SEC XBRL filings for {span} ({fin.fiscal_year_end_phrase}); "
         f"the most recently filed value is used where a period was restated, and free cash flow, net debt "
         f"({NET_DEBT_FORMULA}) and margins are derived in-agent with the formulas shown. Segment detail is not in XBRL and is not included here.*"
     )

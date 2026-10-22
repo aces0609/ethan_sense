@@ -43,16 +43,16 @@ def _entry(**kw) -> es.EvalEntry:
 # ---- config ---------------------------------------------------------------------------------
 
 
-def test_eval_yaml_has_the_five_entries():
+def test_eval_yaml_has_the_five_defense_entries():
     ev = es.load_eval_set()
     by = {e.id: e for e in ev.entries}
-    assert list(by) == ["LMT", "BA", "spacex", "AAPL", "PFE"]
+    assert list(by) == ["LMT", "BA", "spacex", "NOC", "LHX"]
     assert [by[i].kind for i in by] == ["golden", "golden", "golden", "rubric", "rubric"]
     assert by["spacex"].flags == {"private": True} and by["spacex"].ticker is None
     assert by["spacex"].golden == "docs/golden/spacex.md"
-    assert by["AAPL"].expect["fiscal_year_end"] == "0926"
-    assert by["AAPL"].expect["section4"] == "not_applicable"
-    assert by["PFE"].expect["fiscal_year_end"] == "1231" and by["PFE"].sector == "pharma_biotech"
+    assert by["NOC"].expect["fiscal_year_end"] == "1231" and by["NOC"].sector == "aerospace_defense"
+    assert by["NOC"].expect["section4"] == ["full", "partial"]
+    assert by["LHX"].expect["section9"] == "full" and "52/53-week" in by["LHX"].note
     assert by["LMT"].golden_financials == "docs/golden/lmt_financials.json"
     # every sector an entry expects is a tag sources.yaml knows
     from primer.config import sources_config
@@ -93,9 +93,9 @@ def test_only_filters_by_ticker_slug_and_comma_list():
     entries = es.load_eval_set().entries
     assert [e.id for e in es.filter_entries(entries, None)] == [e.id for e in entries]
     assert [e.id for e in es.filter_entries(entries, ["lmt"])] == ["LMT"]
-    assert [e.id for e in es.filter_entries(entries, ["BA,AAPL"])] == ["BA", "AAPL"]
-    assert [e.id for e in es.filter_entries(entries, ["spacex", "PFE"])] == ["spacex", "PFE"]
-    assert [e.id for e in es.filter_entries(entries, ["Apple"])] == ["AAPL"]
+    assert [e.id for e in es.filter_entries(entries, ["BA,NOC"])] == ["BA", "NOC"]
+    assert [e.id for e in es.filter_entries(entries, ["spacex", "LHX"])] == ["spacex", "LHX"]
+    assert [e.id for e in es.filter_entries(entries, ["Northrop Grumman"])] == ["NOC"]
     with pytest.raises(ValueError, match="not in the eval set"):
         es.filter_entries(entries, ["NOPE"])
 
@@ -383,7 +383,11 @@ def test_nothing_evaluated_is_not_a_pass(output_dir):
 
 
 def test_run_flag_executes_each_entry_in_order_then_evaluates(output_dir):
-    entries = [_entry(), _entry(name="Boeing", ticker="BA"), _entry(name="Apple", ticker="AAPL")]
+    entries = [
+        _entry(),
+        _entry(name="Boeing", ticker="BA"),
+        _entry(name="Northrop Grumman", ticker="NOC"),
+    ]
     called: list[str] = []
 
     def runner(e: es.EvalEntry) -> Path:
@@ -393,7 +397,7 @@ def test_run_flag_executes_each_entry_in_order_then_evaluates(output_dir):
         return _fake_run(e, output_root())
 
     rep = es.evaluate_set(entries, run=True, runner=runner, scorecard_fn=lambda *a, **k: {})
-    assert called == ["LMT", "BA", "AAPL"] and rep["mode"] == "run"
+    assert called == ["LMT", "BA", "NOC"] and rep["mode"] == "run"
     ba = next(r for r in rep["entries"] if r["id"] == "BA")
     assert ba["skipped"] and not ba["ok"] and "run raised RuntimeError: boom" in ba["failures"][0]
     assert {r["id"] for r in rep["entries"] if r["ok"]} == set()  # fake runs have no gate

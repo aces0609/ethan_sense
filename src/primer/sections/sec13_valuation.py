@@ -399,7 +399,12 @@ def draft(
 
     web = tool_results.get("web") or []
     web_sids = [r["source_id"] for r in web if r.get("source_id")]
-    page_sids = [s for s in {c.source_ids[0] for c in claims if c.source_ids} if ctx.store.has(s)]
+    # first-appearance order, not set order: a set of strings iterates differently per process
+    page_sids = [
+        s
+        for s in dict.fromkeys(c.source_ids[0] for c in claims if c.source_ids)
+        if ctx.store.has(s)
+    ]
     evidence = list(dict.fromkeys([*page_sids, *web_sids]))
 
     coverage = (

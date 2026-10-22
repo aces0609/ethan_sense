@@ -112,6 +112,20 @@ def replay(
 
     result = replay_primer(run_dir)
     typer.echo(f"replayed {result['original']} -> {result['replay_dir']}")
+    if not result.get("config_snapshot"):
+        typer.echo(
+            "note: this run has no config snapshot, so the replay used today's config/*.yaml; "
+            "a config change since the run makes the model prompts differ"
+        )
+    if result.get("code_changed"):
+        typer.echo(
+            "note: the code differs from the version that made the recording "
+            f"(recorded {str((result.get('code_recorded') or {}).get('commit'))[:10]}"
+            f"{' + uncommitted edits' if (result.get('code_recorded') or {}).get('dirty') else ''}, "
+            f"now {str((result.get('code_now') or {}).get('commit'))[:10]}"
+            f"{' + uncommitted edits' if (result.get('code_now') or {}).get('dirty') else ''}); "
+            "misses can come from the code, not from nondeterminism"
+        )
     if result.get("error"):
         typer.echo(_console_safe(f"replay failed: {result['error'][:300]}"))
     if diff:

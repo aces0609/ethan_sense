@@ -2,11 +2,14 @@
 
 Run once (needs EDGAR_USER_AGENT; uses the on-disk cache when present):
     uv run python tests/fixtures/make_fixtures.py            # everything
-    uv run python tests/fixtures/make_fixtures.py edgar      # or: usaspending
+    uv run python tests/fixtures/make_fixtures.py edgar      # or: usaspending, edgar_lhx
 
 EDGAR: tests/fixtures/edgar/{company_tickers_exchange,submissions_LMT,companyfacts_LMT}.json,
 trimmed to the concepts in config/concepts.yaml and periods ending 2020 or later so the files
-stay small enough to commit. The submissions index keeps 10-K, 10-Q, 8-K and DEF 14A rows
+stay small enough to commit. companyfacts_LHX.json (L3Harris, a 52/53-week filer whose FY2025
+10-K tags revenue with a quarter-length period) is cut the same way plus 10-Q facts from 2024 on;
+the synthetic June and September year-end filers are built in tests/test_fiscal_calendar.py.
+The submissions index keeps 10-K, 10-Q, 8-K and DEF 14A rows
 (with their `items`) so the foundation pack and sections 7, 8 and 14 can run on it.
 
 USAspending: tests/fixtures/usaspending/*.json, the Lockheed responses section 4 consumes:
@@ -57,6 +60,65 @@ AWARD_FIELDS = [
 ]
 
 
+LHX_CIK = "0000202058"
+# L3Harris: 52/53-week year ending the Friday nearest 31 December (declared fiscalYearEnd
+# "0102"). Its FY2025 10-K tags revenue and cost of revenue with a 91-day period, so the
+# fixture also keeps the 10-Q facts of 2024 on (nine-month and quarterly values) that the
+# repair in EdgarClient._select_annual and the quarterly series need.
+LHX_QUARTERLY_SINCE = "2024-01-01"
+
+
+def trim_companyfacts(facts: dict, quarterly_since: str | None = None) -> dict:
+    """Companyfacts cut down to the concepts in config/concepts.yaml, annual-form facts for
+    periods ending 2020 or later (plus 10-Q facts ending on or after `quarterly_since`)."""
+    cfg = concepts_config()
+    wanted: dict[str, set[str]] = {}
+    for metrics in cfg["statements"].values():
+        for spec in metrics.values():
+            wanted.setdefault(spec.get("taxonomy", "us-gaap"), set()).update(
+                spec.get("concepts", [])
+            )
+
+    def keep(e: dict) -> bool:
+        if e.get("end", "") < "2020-01-01":
+            return False
+        if e.get("form", "").startswith("10-K"):
+            return True
+        return bool(
+            quarterly_since
+            and e.get("form", "").startswith("10-Q")
+            and e.get("end", "") >= quarterly_since
+        )
+
+    out_facts: dict = {}
+    for tax, concepts in wanted.items():
+        for concept in concepts:
+            node = facts.get("facts", {}).get(tax, {}).get(concept)
+            if not node:
+                continue
+            units = {}
+            for unit, entries in node["units"].items():
+                kept = [e for e in entries if keep(e)]
+                if kept:
+                    units[unit] = kept
+            if units:
+                out_facts.setdefault(tax, {})[concept] = {
+                    "label": node.get("label"),
+                    "units": units,
+                }
+    return {"cik": facts["cik"], "entityName": facts["entityName"], "facts": out_facts}
+
+
+def record_edgar_lhx(offline: bool = False) -> None:
+    """tests/fixtures/edgar/companyfacts_LHX.json from L3Harris's real companyfacts."""
+    EDGAR_DIR.mkdir(parents=True, exist_ok=True)
+    facts = EdgarClient(offline=offline).companyfacts(LHX_CIK)
+    out = trim_companyfacts(facts, quarterly_since=LHX_QUARTERLY_SINCE)
+    (EDGAR_DIR / "companyfacts_LHX.json").write_text(json.dumps(out), encoding="utf-8")
+    p = EDGAR_DIR / "companyfacts_LHX.json"
+    print(p.name, p.stat().st_size, "bytes")
+
+
 def record_edgar() -> None:
     EDGAR_DIR.mkdir(parents=True, exist_ok=True)
     edgar = EdgarClient()
@@ -82,36 +144,8 @@ def record_edgar() -> None:
     (EDGAR_DIR / "submissions_LMT.json").write_text(json.dumps(subs_out), encoding="utf-8")
 
     facts = edgar.companyfacts(cik)
-    cfg = concepts_config()
-    wanted: dict[str, set[str]] = {}
-    for metrics in cfg["statements"].values():
-        for spec in metrics.values():
-            wanted.setdefault(spec.get("taxonomy", "us-gaap"), set()).update(
-                spec.get("concepts", [])
-            )
-    out_facts: dict = {}
-    for tax, concepts in wanted.items():
-        for concept in concepts:
-            node = facts.get("facts", {}).get(tax, {}).get(concept)
-            if not node:
-                continue
-            units = {}
-            for unit, entries in node["units"].items():
-                kept = [
-                    e
-                    for e in entries
-                    if e.get("end", "") >= "2020-01-01" and e.get("form", "").startswith("10-K")
-                ]
-                if kept:
-                    units[unit] = kept
-            if units:
-                out_facts.setdefault(tax, {})[concept] = {
-                    "label": node.get("label"),
-                    "units": units,
-                }
     (EDGAR_DIR / "companyfacts_LMT.json").write_text(
-        json.dumps({"cik": facts["cik"], "entityName": facts["entityName"], "facts": out_facts}),
-        encoding="utf-8",
+        json.dumps(trim_companyfacts(facts)), encoding="utf-8"
     )
     for p in sorted(EDGAR_DIR.glob("*.json")):
         print(p.name, p.stat().st_size, "bytes")
@@ -251,6 +285,9 @@ def main() -> None:
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     if which in ("all", "edgar"):
         record_edgar()
+        record_edgar_lhx()
+    if which == "edgar_lhx":
+        record_edgar_lhx()
     if which in ("all", "usaspending"):
         record_usaspending()
 

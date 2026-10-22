@@ -67,9 +67,46 @@ def start_recording(run_dir: str | Path, inputs: Inputs, run_id: str | None = No
         "generator_version": __version__,
         "recorded_at": datetime.now(UTC).isoformat(),
     }
+    if not inputs.replay:
+        payload["code"] = code_version()
+        snapshot_config(run_dir)
     (run_dir / INPUTS_FILE).write_text(json.dumps(payload, indent=2), encoding="utf-8")
     if not inputs.replay:
         cache.activate(run_dir, "record")
+
+
+def code_version() -> dict[str, Any]:
+    """Git commit and whether the source tree had uncommitted changes when the run started, so a
+    replay can say whether a mismatch could come from the code rather than from nondeterminism."""
+    import subprocess
+
+    from primer.config import REPO_ROOT
+
+    def git(*args: str) -> str | None:
+        try:
+            out = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), *args],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            return out.stdout.strip() if out.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    status = git("status", "--porcelain", "--", "src", "config")
+    return {"commit": git("rev-parse", "HEAD"), "dirty": bool(status)}
+
+
+def snapshot_config(run_dir: Path) -> None:
+    """Copy config/*.yaml into run_dir/config: config is an input to a run (it shapes the
+    prompts), so an exact replay reads this copy, not whatever the repo holds later."""
+    from primer.config import CONFIG_DIR
+
+    dest = Path(run_dir) / "config"
+    dest.mkdir(parents=True, exist_ok=True)
+    for f in Path(CONFIG_DIR).glob("*.yaml"):
+        shutil.copy2(f, dest / f.name)
 
 
 def read_inputs(run_dir: str | Path) -> tuple[Inputs, dict[str, Any]]:
@@ -127,12 +164,19 @@ def replay_environment(env: dict[str, Any]) -> Iterator[None]:
 
 @contextmanager
 def replay_session(original: Path, replay_dir: Path, env: dict[str, Any]) -> Iterator[None]:
+    from primer.config import use_config_dir
+
+    snapshot = Path(original) / "config"
+    if snapshot.is_dir():
+        use_config_dir(snapshot)
     with replay_environment(env):
         cache.activate(original, "replay", log_dir=replay_dir, env=env)
         try:
             yield
         finally:
             cache.deactivate()
+            if snapshot.is_dir():
+                use_config_dir(None)
 
 
 @contextmanager
@@ -149,8 +193,17 @@ def session_for_resume(run_dir: Path) -> Iterator[bool]:
         with replay_session(Path(inputs.replay_of), run_dir, env):
             yield True
         return
+    from primer.config import use_config_dir
+
+    snapshot = run_dir / "config"
+    if snapshot.is_dir():
+        use_config_dir(snapshot)
     cache.activate(run_dir, "record")
-    yield False
+    try:
+        yield False
+    finally:
+        if snapshot.is_dir():
+            use_config_dir(None)
 
 
 def _replay_dir_for(original: Path) -> Path:
@@ -204,8 +257,23 @@ def replay_primer(run_dir: str | Path) -> dict[str, Any]:
                 "error": repr(e),
             }
     counters = get_runlog(replay_dir).counters
+    try:
+        recorded = (
+            json.loads((original / INPUTS_FILE).read_text(encoding="utf-8")).get("code") or {}
+        )
+    except (OSError, ValueError):
+        recorded = {}
+    now = code_version()
     result.update(
         {
+            "config_snapshot": (original / "config").is_dir(),
+            "code_recorded": recorded,
+            "code_now": now,
+            "code_changed": bool(
+                recorded.get("dirty")
+                or now.get("dirty")
+                or recorded.get("commit") != now.get("commit")
+            ),
             "original": str(original),
             "replay_dir": str(replay_dir),
             "replay_misses": int(counters.get("replay_misses", 0)),

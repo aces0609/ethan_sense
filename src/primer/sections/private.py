@@ -177,7 +177,7 @@ DATE_MY = re.compile(rf"\b({MONTHS})\.?,?\s+(20\d\d)\b", re.I)
 
 TRIGGERS: dict[str, re.Pattern[str]] = {
     k: re.compile(v, re.I)
-    for k, v in {
+    for k, v in {  # deterministic-ok: a dict literal, insertion-ordered
         "tender": r"tender offers?|secondary (?:sale|share sale|offering|transaction)|employee (?:share|stock) sale",
         "valuation": r"valu(?:ed|ation|es|ing)|post-money|pre-money",
         "run_rate": r"run[- ]?rate|annuali[sz]ed|annual recurring revenue|\bARR\b",

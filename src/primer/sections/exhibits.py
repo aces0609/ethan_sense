@@ -105,7 +105,7 @@ def financial_tables(
     }
     for stmt, metrics in cfg["statements"].items():
         rows = [
-            f"**{titles.get(stmt, stmt)}** (USD millions unless noted; fiscal years ending {fin.fiscal_year_end[:2]}/{fin.fiscal_year_end[2:]})",
+            f"**{titles.get(stmt, stmt)}** (USD millions unless noted; {fin.fiscal_year_end_phrase})",
             "",
             header,
             sep,

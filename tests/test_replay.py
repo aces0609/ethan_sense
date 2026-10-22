@@ -471,3 +471,55 @@ def test_cli_replay_exits_0_on_an_identical_replay_and_1_on_a_miss(edgar_mock, o
     # with the diff: a miss fails the replay even when the primer text came out the same
     res = CliRunner().invoke(app, ["replay", str(orig)])
     assert res.exit_code == 1 and "primer.mdx:" in res.output and "missed: edgar:" in res.output
+
+
+def test_replay_uses_the_runs_config_snapshot_not_todays_config(
+    edgar_mock, output_dir, monkeypatch, tmp_path
+):
+    """Config shapes the prompts and the frontmatter, so it is an input to a run: editing
+    config/*.yaml after a run must not break an exact replay (found on 2026-10-22 when a
+    trade-press list edited mid-run made the replay's planner prompt differ)."""
+    from primer import config as cfg
+
+    orig = _run_original([1, 9], output_dir)
+    snap = orig / "config"
+    assert snap.is_dir() and (snap / "sources.yaml").exists() and (snap / "models.yaml").exists()
+    saved = json.loads((orig / "inputs.json").read_text(encoding="utf-8"))
+    assert "code" in saved and set(saved["code"]) == {"commit", "dirty"}
+
+    # edit today's config: a different frontmatter source_limits line
+    edited = tmp_path / "edited_config"
+    edited.mkdir()
+    for f in cfg.DEFAULT_CONFIG_DIR.glob("*.yaml"):
+        (edited / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+    text = (edited / "sources.yaml").read_text(encoding="utf-8")
+    marker = "Market data scraped from public aggregator pages, not a licensed feed"
+    assert marker in text
+    (edited / "sources.yaml").write_text(
+        text.replace(marker, "CHANGED AFTER THE RUN"), encoding="utf-8"
+    )
+    cfg.use_config_dir(edited)
+    try:
+        assert "CHANGED AFTER THE RUN" in "".join(cfg.sources_config()["source_limits"])
+        _advance_clock(monkeypatch)
+        result = replay_mod.replay_primer(orig)
+        assert result["config_snapshot"] is True
+        report = replay_mod.compare_runs(orig, Path(result["replay_dir"]))
+        assert report["primer_identical"], report["diff_head"]
+        assert "CHANGED AFTER THE RUN" not in (orig / "primer.mdx").read_text(encoding="utf-8")
+        # the replay put the config in effect back to the one it found, not the repo default
+        assert cfg.CONFIG_DIR == cfg.DEFAULT_CONFIG_DIR
+    finally:
+        cfg.use_config_dir(None)
+
+
+def test_a_run_without_a_snapshot_is_replayed_with_a_warning_flag(
+    edgar_mock, output_dir, monkeypatch
+):
+    import shutil
+
+    orig = _run_original([1, 9], output_dir)
+    shutil.rmtree(orig / "config")
+    _advance_clock(monkeypatch)
+    result = replay_mod.replay_primer(orig)
+    assert result["config_snapshot"] is False and "code_changed" in result

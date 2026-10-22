@@ -210,7 +210,11 @@ def _lead_sentences(
     elif peers:
         out.append(f"The 10-K names {', '.join(peers)} as competitors{cite}")
     # competitor comparison from scraped pages (only when the page text names a peer)
-    peer_keys = [p.split()[0] for p in peers if p] + peer_fallbacks(ctx.entity.sector_tag)
+    peer_keys = [
+        k
+        for k in [p.split()[0] for p in peers if p] + peer_fallbacks(ctx.entity.sector_tag)
+        if k.lower() not in ctx.co.lower()  # never list the company against itself
+    ]
     for w in web:
         sid = w["source_id"]
         if not ctx.store.has(sid):

@@ -208,7 +208,7 @@ def check_recency(sections_md: dict[int, str], store: EvidenceStore, as_of: date
     cutoff = as_of - timedelta(days=365)
     stale = []
     md = sections_md.get(14, "")
-    for sid in set(re.findall(r"\[(src_\d{4})\]", md)):
+    for sid in sorted(set(re.findall(r"\[(src_\d{4})\]", md))):
         rec = store.get(sid) if store.has(sid) else None
         if rec and rec.published_date and rec.published_date < cutoff:
             stale.append({"source_id": sid, "published": rec.published_date.isoformat()})

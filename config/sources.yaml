@@ -70,47 +70,36 @@ program_status_hosts:
   - acq.osd.mil
 
 # Sector trade press, keyed by a sector tag that resolve_entity assigns from the SIC code.
+# This tool is used on defense companies only, so the defense list is also the default: a
+# company with an unfamiliar SIC code (or a private one with none) gets it too.
 trade_press:
-  aerospace_defense:
+  aerospace_defense: &defense_press
     - breakingdefense.com
     - defensenews.com
     - janes.com
     - aviationweek.com
     - flightglobal.com
     - airandspaceforces.com
-  technology:
-    - theverge.com
-    - arstechnica.com
-    - techcrunch.com
-    - 9to5mac.com
-    - tomshardware.com
-    - semiengineering.com
-  pharma_biotech:
-    - fiercepharma.com
-    - fiercebiotech.com
-    - statnews.com
-    - endpts.com
-    - biopharmadive.com
-  industrial:
-    - industryweek.com
-    - constructiondive.com
-    - supplychaindive.com
-  default: []
+    - defenseone.com
+    - twz.com
+    - insidedefense.com
+    - spacenews.com
+    - navalnews.com
+    - defensescoop.com
+    - militaryaerospace.com
+  default: *defense_press
 
 # SIC code (4 digits) -> sector tag, first match wins. Ranges are inclusive "lo-hi" strings.
-# Extending coverage to a new sector is a config change: add the tag here and its trade press above.
+# Every other code gets the tag "default", which carries the same defense configuration.
 sectors:
-  aerospace_defense: ["3720-3729", "3760-3769", "3812-3812", "3480-3489", "3795-3795"]
-  technology: ["3570-3579", "3660-3679", "3674-3674", "7370-7379", "3571-3571"]
-  pharma_biotech: ["2830-2836", "8731-8731"]
-  industrial: ["3510-3569", "3580-3599", "3710-3719"]
+  aerospace_defense: ["3720-3729", "3760-3769", "3812-3812", "3480-3489", "3795-3795", "3663-3663", "3669-3669", "3731-3731", "3732-3732", "7373-7373", "8711-8711"]
 
 # Sector-specific research prompts layered onto the generic section briefs, keyed
 # sector tag -> section number. `web_queries` are appended to the section's template queries
 # ({co}, {fy} placeholders) and `sub_questions` to its sub-questions. A company whose sector
 # tag has no entry gets the generic brief only. Adding a sector is a config change.
 sector_briefs:
-  aerospace_defense:
+  aerospace_defense: &defense_briefs
     3:
       web_queries:
         - "{co} sixth-generation fighter"
@@ -124,33 +113,13 @@ sector_briefs:
         - "{co} contract conversion OR definitization OR multiyear award {fy}"
       sub_questions:
         - "Which contracts were converted, definitized or awarded as multiyear in the window, and for what value?"
-  pharma_biotech:
-    3:
-      web_queries:
-        - "{co} pipeline phase 3"
-        - "{co} FDA approval {fy}"
-      sub_questions:
-        - "Which pipeline candidates are in Phase 3 or under regulatory review, and which readouts or decisions are dated in the window?"
-    14:
-      web_queries:
-        - "{co} FDA approval OR clinical trial results OR patent expiry {fy}"
-      sub_questions:
-        - "Which regulatory decisions, trial readouts or loss-of-exclusivity events fall inside the window, and on what date?"
-  technology:
-    3:
-      web_queries:
-        - "{co} installed base OR active devices OR subscribers"
-      sub_questions:
-        - "What installed-base, subscriber or active-device counts does the company report, and as of when?"
+  default: *defense_briefs
 
 # Competitor names looked for in scraped pages when comparing the company with its peers
 # (section 3), in addition to the competitors the 10-K names. Single words, matched whole-word.
 peer_fallbacks:
-  aerospace_defense: [Boeing, RTX, Northrop, Airbus, BAE]
-  technology: [Microsoft, Samsung, Google, Alphabet, Amazon, Dell, Huawei]
-  pharma_biotech: [Merck, "Johnson & Johnson", AbbVie, Lilly, Novartis, AstraZeneca, GSK, Roche, Sanofi]
-  industrial: [Caterpillar, Deere, Honeywell, Siemens, Emerson]
-  default: []
+  aerospace_defense: &defense_peers [Boeing, RTX, Northrop, Lockheed, Dynamics, L3Harris, Airbus, BAE, Anduril, Huntington, Leonardo, Thales, Rheinmetall]
+  default: *defense_peers
 
 # Frontmatter source_limits that every v1 primer carries (requirements §2).
 source_limits:
