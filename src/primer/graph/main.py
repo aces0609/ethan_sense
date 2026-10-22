@@ -153,6 +153,12 @@ def resolve_entity(state: PrimerState) -> dict[str, Any]:
         elif match:
             subs = edgar.submissions(match["cik"])
             ent = ent_mod.apply_sec_match(ent, match, subs, inputs.company_name)
+        # names the user supplied (`--alias`): the name people and trade press use ("SpaceX")
+        # next to the legal name that filings and USAspending use
+        if inputs.aliases:
+            ent.aliases = sorted(
+                {*ent.aliases, *(a.strip() for a in inputs.aliases if a.strip())} - {ent.name}
+            )
     runlog.meta["entity"] = ent.model_dump(mode="json")
     return {"entity": ent.model_dump(mode="json")}
 

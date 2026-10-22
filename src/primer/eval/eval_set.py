@@ -57,6 +57,7 @@ class EvalEntry(BaseModel):
 
     name: str
     ticker: str | None = None
+    aliases: list[str] = Field(default_factory=list)
     kind: Literal["golden", "rubric"] = "rubric"
     golden: str | None = None
     golden_financials: str | None = None
@@ -105,6 +106,8 @@ class EvalEntry(BaseModel):
             (self.ticker or "").lower(),
             slugify(self.name),
             self.name.lower(),
+            *(slugify(a) for a in self.aliases),
+            *(a.lower() for a in self.aliases),
         }
 
 
@@ -204,6 +207,7 @@ def default_runner(entry: EvalEntry) -> Path:
         ticker=entry.ticker,
         as_of_date=date.fromisoformat(entry.as_of) if entry.as_of else date.today(),
         sections=parse_sections(entry.sections),
+        aliases=list(entry.aliases),
         **entry.flags,
     )
     result = run_primer(inputs)

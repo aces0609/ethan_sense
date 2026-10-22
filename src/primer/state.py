@@ -55,6 +55,7 @@ class Inputs(BaseModel):
     replay: bool = False  # exact offline replay of an earlier run (record/replay layer)
     replay_of: str | None = None  # run directory the replay reads its recording from
     cik: str | None = None  # pre-resolved CIK (answer to the ambiguity prompt)
+    aliases: list[str] = Field(default_factory=list)  # other names for the company (--alias)
 
 
 class Entity(BaseModel):

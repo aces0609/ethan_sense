@@ -57,3 +57,25 @@ def test_the_guard_catches_the_section_13_pattern():
         for rx in RISKY
     )
     assert not any(rx.search("for s in sorted({c for c in claims})") for rx in RISKY)
+
+
+def test_no_control_characters_in_the_source_tree():
+    """A '\b' written through a shell heredoc becomes a backspace character inside the regex
+    and the pattern silently never matches (found on 2026-10-22 in three places: the
+    subsidiary filter of the employee counter, two officer-detection patterns in the
+    attribution check, and the new corp-suffix filter). Source and config must be free of them."""
+    import re as _re
+
+    bad = _re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+    root = SRC.parent.parent
+    hits = []
+    for sub in ("src", "tests", "config", "tools"):
+        for path in sorted((root / sub).rglob("*")):
+            if path.suffix not in {".py", ".yaml", ".mjs", ".toml"} or "node_modules" in path.parts:
+                continue
+            if path.name == "test_determinism.py":
+                continue  # this file spells the character class out
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if bad.search(line):
+                    hits.append(f"{path.relative_to(root)}:{n}")
+    assert not hits, "control characters in source: " + ", ".join(hits)

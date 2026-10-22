@@ -223,7 +223,7 @@ EMPLOYEE_PREFERRED = re.compile(
 )
 # a subsidiary or acquired unit counted on its own is not the company-wide figure
 SUBSIDIARY_WORDS = re.compile(
-    r"(subsidiary|subsidiaries|acquired|acquisition|joint venture|Spirit employs|segment employs)",
+    r"\b(subsidiary|subsidiaries|acquired|acquisition|joint venture|Spirit employs|segment employs)\b",
     re.I,
 )
 EMPLOYEE_ANY = re.compile(

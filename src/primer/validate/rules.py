@@ -146,11 +146,11 @@ def _is_company_person(name: str, sections_md: dict[int, str]) -> bool:
     joined = " ".join(sections_md.values())
     return bool(
         re.search(
-            rf"{re.escape(words[-1])}[^.]{{0,80}}(?:CEO|CFO|COO|Chief|President|Chairman|Executive Vice President)",
+            rf"\b{re.escape(words[-1])}\b[^.]{{0,80}}\b(?:CEO|CFO|COO|Chief|President|Chairman|Executive Vice President)",
             joined,
         )
         or re.search(
-            rf"(?:CEO|CFO|COO|Chief [A-Za-z ]+Officer|President|Chairman)[^.]{{0,40}}{re.escape(words[-1])}",
+            rf"\b(?:CEO|CFO|COO|Chief [A-Za-z ]+Officer|President|Chairman)\b[^.]{{0,40}}\b{re.escape(words[-1])}\b",
             joined,
         )
     )

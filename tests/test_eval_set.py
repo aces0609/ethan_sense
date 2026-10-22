@@ -46,10 +46,16 @@ def _entry(**kw) -> es.EvalEntry:
 def test_eval_yaml_has_the_five_defense_entries():
     ev = es.load_eval_set()
     by = {e.id: e for e in ev.entries}
-    assert list(by) == ["LMT", "BA", "spacex", "NOC", "LHX"]
+    assert list(by) == ["LMT", "BA", "space-exploration-technologies-corp", "NOC", "LHX"]
     assert [by[i].kind for i in by] == ["golden", "golden", "golden", "rubric", "rubric"]
-    assert by["spacex"].flags == {"private": True} and by["spacex"].ticker is None
-    assert by["spacex"].golden == "docs/golden/spacex.md"
+    assert (
+        by["space-exploration-technologies-corp"].flags == {"private": True}
+        and by["space-exploration-technologies-corp"].ticker is None
+    )
+    assert by["space-exploration-technologies-corp"].aliases == ["SpaceX"] and by[
+        "space-exploration-technologies-corp"
+    ].matches("spacex")
+    assert by["space-exploration-technologies-corp"].golden == "docs/golden/spacex.md"
     assert by["NOC"].expect["fiscal_year_end"] == "1231" and by["NOC"].sector == "aerospace_defense"
     assert by["NOC"].expect["section4"] == ["full", "partial"]
     assert by["LHX"].expect["section9"] == "full" and "52/53-week" in by["LHX"].note
@@ -94,7 +100,10 @@ def test_only_filters_by_ticker_slug_and_comma_list():
     assert [e.id for e in es.filter_entries(entries, None)] == [e.id for e in entries]
     assert [e.id for e in es.filter_entries(entries, ["lmt"])] == ["LMT"]
     assert [e.id for e in es.filter_entries(entries, ["BA,NOC"])] == ["BA", "NOC"]
-    assert [e.id for e in es.filter_entries(entries, ["spacex", "LHX"])] == ["spacex", "LHX"]
+    assert [e.id for e in es.filter_entries(entries, ["spacex", "LHX"])] == [
+        "space-exploration-technologies-corp",
+        "LHX",
+    ]
     assert [e.id for e in es.filter_entries(entries, ["Northrop Grumman"])] == ["NOC"]
     with pytest.raises(ValueError, match="not in the eval set"):
         es.filter_entries(entries, ["NOPE"])

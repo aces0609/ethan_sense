@@ -186,13 +186,57 @@ def _classify_links(links: list[str]) -> dict[str, list[str]]:
     return out
 
 
-def _pick_transcript(hits: list[dict[str, Any]], hosts: list[str], qn: str, yr: str):
-    """First hit on a transcript host (priority order) whose title names the quarter and year."""
+_CORP_WORDS = re.compile(
+    r"\b(corp|corporation|inc|incorporated|co|company|ltd|plc|holdings?|group|the|de)\b",
+    re.I,
+)
+
+
+def company_tokens(ent: Entity) -> tuple[list[str], str | None]:
+    """(name tokens, ticker) that identify the company in a title, URL or page: each name or
+    alias with legal suffixes and punctuation removed, spaces squeezed out ("L3HARRIS
+    TECHNOLOGIES, INC. /DE/" -> "l3harristechnologies" and "l3harris"), kept when 4+ characters;
+    a token is also the name's first word when that word is distinctive (6+ characters)."""
+    toks: set[str] = set()
+    for n in [ent.name, *ent.aliases]:
+        cleaned = _CORP_WORDS.sub(" ", re.sub(r"[^A-Za-z0-9 ]", " ", n or ""))
+        words = [w for w in cleaned.split() if w]
+        compact = "".join(words).lower()
+        if len(compact) >= 4:
+            toks.add(compact)
+        if words and len(words[0]) >= 6:
+            toks.add(words[0].lower())
+    return sorted(toks), (ent.ticker or "").lower() or None
+
+
+def names_company(text: str, ent: Entity) -> bool:
+    """True when `text` (a title, URL or the head of a page) names the company: a name token as a
+    substring of the text with spaces and punctuation removed, or the ticker as a whole word.
+    A transcript search for L3Harris's Q2 2026 call returned Deere's, and it was accepted
+    (2026-10-22): the picker checked the host, the quarter and the year but never the company."""
+    toks, ticker = company_tokens(ent)
+    squeezed = re.sub(r"[^a-z0-9]", "", (text or "").lower())
+    if any(t in squeezed for t in toks):
+        return True
+    if ticker and re.search(rf"(?<![a-z0-9]){re.escape(ticker)}(?![a-z0-9])", (text or "").lower()):
+        return True
+    return False
+
+
+def _pick_transcript(
+    hits: list[dict[str, Any]], hosts: list[str], qn: str, yr: str, ent: Entity | None = None
+):
+    """First hit on a transcript host (priority order) whose title names the quarter and year
+    and, when `ent` is given, the company."""
     for host in hosts:
         fallback = None
         for h in hits:
             dom = h.get("domain", "")
             if not (dom == host or dom.endswith("." + host)):
+                continue
+            if ent is not None and not names_company(
+                f"{h.get('title') or ''} {h.get('url') or ''}", ent
+            ):
                 continue
             title = (h.get("title") or "").lower().replace(" ", "")
             url = h.get("url", "").lower()
@@ -452,7 +496,7 @@ def _transcripts_and_ir(store, ent, as_of, found, runlog, offline: bool) -> None
             except FirecrawlError as e:
                 runlog.error(f"foundation transcript search {q['label']}: {e}")
                 break
-            chosen = _pick_transcript(hits, hosts, qn, yr)
+            chosen = _pick_transcript(hits, hosts, qn, yr, ent)
             if chosen:
                 break
         if chosen is None and site:
@@ -472,7 +516,14 @@ def _transcripts_and_ir(store, ent, as_of, found, runlog, offline: bool) -> None
                 res = fc.scrape(chosen["url"], type="earnings_call", section_hint="foundation")
             scrapes += 1
             sid = res.get("source_id")
-            if sid and len(res.get("markdown", "")) > 2000:
+            head = (res.get("markdown") or "")[:6000]
+            if sid and len(res.get("markdown", "")) > 2000 and not names_company(head, ent):
+                runlog.error(
+                    f"foundation transcript {q['label']}: {chosen['url']} does not name "
+                    f"{ent.name}; not used"
+                )
+                missed.append(q["label"])
+            elif sid and len(res.get("markdown", "")) > 2000:
                 q["transcript_sid"] = sid
                 rec = store.get(sid)
                 rec.meta["quarter"] = q["label"]

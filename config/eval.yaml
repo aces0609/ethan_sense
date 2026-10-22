@@ -1,7 +1,9 @@
 # The eval set (PLAN 3.5, requirements §7): the companies `primer eval-set` runs and scores.
 #
 # Each entry:
-#   name        company name passed to `primer run --company`
+#   name        company name passed to `primer run --company` (for a private company the legal
+#               name: it is how filings and USAspending know it)
+#   aliases     everyday names (`primer run --alias`), also accepted by `eval-set --only`
 #   ticker      ticker, or null for a name-only (private) run; it also names the output folder
 #               (output/{TICKER}/ or output/{slug-of-name}/) and is what `--only` matches
 #   kind        golden: a reference primer exists (the judge and fact overlap compare against it)
@@ -64,7 +66,8 @@ entries:
       fiscal_year_end: "1231"
       section9: full
 
-  - name: SpaceX
+  - name: Space Exploration Technologies Corp
+    aliases: [SpaceX]
     ticker: null
     kind: golden
     golden: docs/golden/spacex.md

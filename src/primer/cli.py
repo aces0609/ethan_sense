@@ -47,6 +47,13 @@ def run(
     cik: str | None = typer.Option(
         None, "--cik", help="SEC CIK; answers the entity prompt for an ambiguous name"
     ),
+    alias: list[str] = typer.Option(
+        [],
+        "--alias",
+        help="Another name for the company, repeatable (for a private company pass the legal "
+        "name as --company, which is how filings and USAspending know it, and the everyday "
+        "name here, e.g. --company 'Space Exploration Technologies Corp' --alias SpaceX)",
+    ),
     yes: bool = typer.Option(
         False,
         "--yes",
@@ -69,6 +76,7 @@ def run(
         offline=offline,
         private=private,
         cik=cik,
+        aliases=list(alias),
     )
     try:
         result = run_primer(inputs, on_interrupt=make_cli_prompter(yes=yes))

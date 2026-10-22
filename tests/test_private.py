@@ -749,3 +749,37 @@ def test_web_only_draft_for_sections_that_normally_read_the_10k(
     assert f"[{sid}]" in out.markdown
     assert "no 10-K exists for this private company" in out.markdown
     assert "> Coverage: partial — private company: no 10-K exists" in out.markdown
+
+
+def test_alias_option_reaches_the_inputs_and_the_entity(monkeypatch, tmp_path):
+    """A private company is known to filings and USAspending by its legal name and to people by
+    another (Space Exploration Technologies Corp / SpaceX): both must reach the run."""
+    from typer.testing import CliRunner
+
+    import primer.graph.main as gm
+    from primer.cli import app
+
+    seen = {}
+
+    def fake_run(inputs, run_id=None, run_dir=None, on_interrupt=None):
+        seen["inputs"] = inputs
+        return {"run_id": "x", "run_dir": str(tmp_path), "mdx_path": None}
+
+    monkeypatch.setattr(gm, "run_primer", fake_run)
+    res = CliRunner().invoke(
+        app,
+        [
+            "run",
+            "--company",
+            "Space Exploration Technologies Corp",
+            "--private",
+            "--alias",
+            "SpaceX",
+            "--alias",
+            "Space X",
+            "--sections",
+            "1",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert seen["inputs"].aliases == ["SpaceX", "Space X"] and seen["inputs"].private
