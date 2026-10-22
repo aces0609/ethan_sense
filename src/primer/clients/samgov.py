@@ -96,8 +96,10 @@ class SamGovClient:
         legal_name: str | None = None,
         registration_status: str | None = "A",
         page: int = 0,
-        size: int = 100,
+        size: int = 10,
     ) -> dict[str, Any]:
+        """One page of registrations. Personal API keys are limited to 10 records per page
+        (the API answers 400 "Size Cannot Exceed 10 Records" above that)."""
         params: dict[str, Any] = {"page": page, "size": size}
         if uei:
             params["ueiSAM"] = uei
@@ -146,8 +148,19 @@ class SamGovClient:
                 }
                 if parent_uei in parents:
                     out.append(ent)
-            if len(ents) < 100:
+            if len(ents) < 10:
                 break
+        return out
+
+    def entities_by_uei(self, ueis: list[str], max_calls: int = 10) -> list[dict[str, Any]]:
+        """One registration per UEI, one call each, within max_calls (the per-primer SAM.gov
+        budget). Resolution by UEI, never by name (requirements §7)."""
+        out: list[dict[str, Any]] = []
+        for uei in ueis[:max_calls]:
+            if self.quota.remaining() <= 0:
+                break
+            resp = self.entities(uei=uei, registration_status=None, size=1)
+            out.extend(resp.get("entityData", []))
         return out
 
     # ---- opportunities ---------------------------------------------------------------

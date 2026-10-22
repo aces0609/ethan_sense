@@ -282,6 +282,11 @@ def _peer_row(ctx: ToolContext, peer: dict[str, Any]) -> dict[str, Any]:
         "error": None,
     }
     vals: dict[str, Val] = {}
+    if not peer.get("cik"):
+        # a rival the 10-K names that has no SEC filings (Airbus, BAE): n/a cells, never a
+        # page-sourced substitute
+        row["error"] = peer.get("note") or "no SEC filings"
+        return row
     pent = Entity(name=peer.get("name") or "", ticker=peer.get("ticker"), cik=peer.get("cik"))
     try:
         fin = ctx.edgar.annual_financials(pent.cik, as_of=ctx.as_of)  # type: ignore[arg-type]
@@ -509,10 +514,14 @@ def _lead_sentences(
             f"a forward P/E of {p.value / c.eps_next.value:.1f}x (derived: price ÷ consensus EPS)."
         )
     peers = tr.get("peers") or []
-    missing = [r["ticker"] for r in peers if not r.get("vals", {}).get("ev_ebitda_ltm_ratio")]
+    missing = [
+        r.get("ticker") or r.get("name") or "?"
+        for r in peers
+        if not r.get("vals", {}).get("ev_ebitda_ltm_ratio")
+    ]
     if peers:
         out.append(
-            f"The peer set from the 10-K competition text is {', '.join(r['ticker'] for r in peers if r.get('ticker'))}"
+            f"The peer set from the 10-K competition text is {', '.join(r.get('ticker') or r.get('name') or '?' for r in peers)}"
             + (
                 f"; LTM multiples could not be derived for {', '.join(missing)} and are shown as n/a rather than taken from an aggregator page."
                 if missing

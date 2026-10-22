@@ -315,7 +315,7 @@ def key_takeaways(state: PrimerState) -> dict[str, Any]:
             prose = [
                 p.strip()
                 for p in d["markdown"].split("\n\n")
-                if p.strip() and not p.startswith(("|", ">", "#", "*Caveat", "**"))
+                if p.strip() and not p.startswith(("|", ">", "#", "*Caveat", "**", "-", "*"))
             ]
             for sentence in prose[:per_section]:
                 first = re.split(r"(?<=[.!?])\s+", sentence)[0]

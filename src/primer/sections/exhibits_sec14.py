@@ -123,9 +123,24 @@ def first_body_sentence(md: str, skip_title: bool = True) -> str:
     lines = [ln.strip() for ln in md.splitlines() if ln.strip()]
     if skip_title and lines and lines[0].startswith("#"):
         lines = lines[1:]
-    body = " ".join(ln for ln in lines if not ln.startswith(("#", "|", "!", "[", "-", "*")))
+    keep = []
+    for ln in lines:
+        if ln.startswith(("#", "|", "!", "[", "-", "*")):
+            continue
+        words = ln.split()
+        if len(words) < 6:
+            continue  # navigation, buttons, bylines
+        caps = sum(1 for w in words if w.isupper() and len(w) > 1)
+        if caps > len(words) / 3:
+            continue  # "CREATE FREE ACCOUNT Menu Key Points" style clutter
+        if re.search(
+            r"\b(sign in|subscribe|create free account|menu|key points|skip to)\b", ln, re.I
+        ):
+            continue
+        keep.append(ln)
+    body = " ".join(keep)
     for s in sentences(body):
-        if len(s) >= 30:
+        if len(s) >= 60 and len(s.split()) >= 8:
             return s[:240]
     return (body[:240] + "…") if body else "n/a"
 

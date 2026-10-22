@@ -200,8 +200,11 @@ def test_valuation_with_market_adapter(edgar_mock, firecrawl_mock, output_dir):
 
     # peer table: a row per foundation peer; peers without companyfacts show n/a, no substitute
     peer_block = next(b for b in blocks if "Peer" in b or "(BA)" in b)
-    peers = [p["ticker"] for p in st["foundation"]["peers"]]
+    peers = [p["ticker"] for p in st["foundation"]["peers"] if p.get("ticker")]
     assert peers == ["BA", "GD", "NOC", "RTX"]
+    # rivals without SEC filings (Airbus, BAE, L3Harris in the trimmed ticker file) are kept
+    # as peers with no ticker and must show n/a cells, never a page-sourced substitute
+    assert [p["name"] for p in st["foundation"]["peers"] if not p.get("ticker")]
     for tk in peers:
         row = next(line for line in peer_block.splitlines() if f"({tk})" in line)
         assert row.count("n/a") >= 5, row

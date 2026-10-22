@@ -112,7 +112,20 @@ def parse_release_outlook(text: str, default_fy: int | None = None) -> ReleaseOu
         None,
     )
     if start is None:
-        start = next((i for i, ln in enumerate(lines) if "outlook" in ln.lower()), None)
+        # a short heading-like line naming the outlook or guidance; a bullet or a prose line
+        # that merely mentions "outlook" is not the table (a release without guidance yields
+        # no rows rather than revenue lines mistaken for guidance)
+        start = next(
+            (
+                i
+                for i, ln in enumerate(lines)
+                if len(ln.strip()) <= 60
+                and re.search(r"\b(outlook|guidance)\b", ln, re.I)
+                and not re.search(r"\b(updates?|raises?|reaffirms?|lowers?|cuts?)\b", ln, re.I)
+                and "|" not in ln
+            ),
+            None,
+        )
     if start is None:
         return out
     per_share_scale = 1.0

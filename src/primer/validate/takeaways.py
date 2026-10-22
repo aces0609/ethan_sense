@@ -16,7 +16,7 @@ from typing import Any
 from primer.sections.style import CITATION_TOKEN
 
 NUMBER = re.compile(r"(?<![\w.])(-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?)(?![\w])")
-SECTION_TAG = re.compile(r"\(Section (\d{1,2})\)\s*$")
+SECTION_TAG = re.compile(r"\(Section (\d{1,2})\)[.\s]*$")
 SKIP = re.compile(r"\b(?:Q[1-4]|FY|fiscal|20\d{2}|19\d{2}|Section)\b", re.I)
 SCALES = (1.0, 1e-6, 1e-9, 1e-3, 100.0, 1e-2)
 

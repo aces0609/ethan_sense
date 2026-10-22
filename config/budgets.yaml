@@ -25,7 +25,7 @@ market_data:
   credits: 40            # six aggregator pages with JSON schemas, scraped once per run
 
 per_primer:
-  tokens: 400000
+  tokens: 600000        # measured: a full pass with two critic iterations needs ~450k on Claude Opus
   credits: 420
   samgov_calls: 10
   wall_clock_minutes: 30

@@ -16,6 +16,9 @@ import re
 from datetime import timedelta
 from typing import Any
 
+from pydantic import BaseModel, Field
+
+from primer.llm import invoke_structured
 from primer.sections.common import (
     ToolContext,
     caveat_line,
@@ -27,13 +30,61 @@ from primer.sections.common import (
     unavailable_draft,
 )
 from primer.sections.exhibits_sec08 import (
+    Officer,
     governance_exhibit,
     governance_facts,
     officer_rows,
     ownership_rows,
 )
-from primer.sections.text_tools import exec_officer_rows
+from primer.sections.text_tools import exec_officer_rows, paragraphs_with
 from primer.state import Brief, SectionDraft
+
+
+class _OfficerRow(BaseModel):
+    name: str
+    age: int | None = None
+    title: str
+
+
+class _OfficerList(BaseModel):
+    officers: list[_OfficerRow] = Field(default_factory=list)
+
+
+def _officers_from_model(ctx, tenk_text, tenk_sid, proxy_text, proxy_sid):
+    """When neither filing carries a table layout the deterministic parser reads (Boeing's
+    proxy lists officers in prose), ask the cheap model to extract name, age and title from
+    the registered filing text only; rows cite that filing."""
+    for text, sid, label in ((proxy_text, proxy_sid, "DEF 14A"), (tenk_text, tenk_sid, "10-K")):
+        if not sid or not text:
+            continue
+        paras = paragraphs_with(text, ["executive officer"], window=2, max_paragraphs=6, min_len=60)
+        paras += paragraphs_with(text, ["chief executive officer"], window=1, max_paragraphs=4)
+        blob = "\n\n".join(dict.fromkeys(paras))[:30000]
+        if len(blob) < 500:
+            continue
+        out = invoke_structured(
+            "query_planner",
+            _OfficerList,
+            "Extract the company's current executive officers (name, age if stated, title) from "
+            "the filing excerpt. Only people the excerpt names as executive officers; never guess. "
+            "Return an empty list when the excerpt has none.",
+            blob,
+            ctx.runlog,
+        )
+        rows = [o for o in (out.officers if out else []) if o.name and o.title]
+        if len(rows) >= 2:
+            return [
+                Officer(
+                    o.name.strip(),
+                    str(o.age) if o.age else "n/a",
+                    o.title.strip()[:160],
+                    sid,
+                    label,
+                )
+                for o in rows[:20]
+            ], label
+    return [], ""
+
 
 OWNERSHIP_FORMS = ["SC 13G", "SC 13G/A", "SC 13D", "SC 13D/A"]
 INSIDER_FORMS = ["4", "4/A"]
@@ -188,6 +239,10 @@ def draft(
     proxy_text = ctx.store.text(proxy_sid) if proxy_sid and ctx.store.has(proxy_sid) else ""
     tenk_text = res.get("tenk_text") or ""
     officers, basis = officer_rows(tenk_text, tenk_sid, proxy_text, proxy_sid)
+    if len(officers) < 3:
+        extra, src = _officers_from_model(ctx, tenk_text, tenk_sid, proxy_text, proxy_sid)
+        if extra:
+            officers, basis = extra, src
     holders = ownership_rows(proxy_text, proxy_sid) if proxy_sid else []
     facts = governance_facts(proxy_text, proxy_sid)
     filing_dates = {

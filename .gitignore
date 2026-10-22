@@ -27,3 +27,8 @@ node_modules/
 .vscode/
 *.swp
 .DS_Store
+
+# licensed reference primers (AlphaSense) under docs/golden: keep local only; the
+# derived *_financials.json tables are committed
+docs/golden/*.md
+docs/golden/*.pdf

@@ -335,7 +335,14 @@ def gov_revenue_disclosure(text: str) -> tuple[bool | None, str | None, float | 
         pcts = [x for x in pcts if x <= 100]
         if not pcts:
             continue
-        pct = max(pcts)  # the total US-government share is the largest figure in the sentence
+        # prefer the percent that qualifies total revenue/sales ("46% of our total revenues"),
+        # else the largest figure in the sentence
+        tot = re.search(
+            r"(\d{1,3})\s?%\s+of\s+(?:our\s+|its\s+|the\s+)?(?:total\s+|consolidated\s+|net\s+)*(?:revenues?|sales)",
+            sent,
+            re.I,
+        )
+        pct = float(tot.group(1)) if tot and float(tot.group(1)) <= 100 else max(pcts)
         if best is None or pct > best[1]:
             best = (sent, pct)
     if best:
@@ -371,7 +378,8 @@ def competitor_candidates(text: str, self_name: str, limit: int = 40) -> list[st
     return [k for k, _ in sorted(cands.items(), key=lambda kv: -kv[1])][:limit]
 
 
-DESIGNATION = re.compile(r"\b([A-Z]{1,4}-\d{1,3}[A-Z]{0,2}(?:\s?[A-Z]{1,4})?)\b")
+# F-35, PAC-3 MSE, C-130J and slashed designations such as F/A-18 or E/A-18G
+DESIGNATION = re.compile(r"\b([A-Z]{1,4}(?:/[A-Z]{1,2})?-\d{1,3}[A-Z]{0,2}(?:\s?[A-Z]{1,4})?)\b")
 
 
 def program_designations(text: str) -> dict[str, int]:
@@ -379,8 +387,8 @@ def program_designations(text: str) -> dict[str, int]:
     out: dict[str, int] = {}
     for m in DESIGNATION.finditer(text):
         d = m.group(1).strip()
-        if re.fullmatch(r"[A-Z]{1,4}-\d{1,3}[A-Z]{0,2}", d) or " " in d:
-            base = re.match(r"[A-Z]{1,4}-\d{1,3}[A-Z]{0,2}", d).group(0)  # type: ignore[union-attr]
+        if re.fullmatch(r"[A-Z]{1,4}(?:/[A-Z]{1,2})?-\d{1,3}[A-Z]{0,2}", d) or " " in d:
+            base = re.match(r"[A-Z]{1,4}(?:/[A-Z]{1,2})?-\d{1,3}[A-Z]{0,2}", d).group(0)  # type: ignore[union-attr]
             out[base] = out.get(base, 0) + 1
     return dict(sorted(out.items(), key=lambda kv: -kv[1]))
 

@@ -113,10 +113,11 @@ def _entity(uei, parent, name="LOCKHEED MARTIN CORPORATION"):
 @respx.mock
 def test_samgov_entity_walk_pages_and_registers(store, tmp_path, monkeypatch):
     monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    # personal keys get 10 records per page
     pages = [
-        [_entity(f"UEI{i:03d}", "PARENT") for i in range(100)],
-        [_entity(f"UEI{i:03d}", "PARENT") for i in range(100, 200)],
-        [_entity("UEI200", "PARENT"), _entity("UEI201", "OTHER")],
+        [_entity(f"UEI{i:03d}", "PARENT") for i in range(10)],
+        [_entity(f"UEI{i:03d}", "PARENT") for i in range(10, 20)],
+        [_entity("UEI020", "PARENT"), _entity("UEI021", "OTHER")],
     ]
     calls = {"n": 0}
 
@@ -128,9 +129,27 @@ def test_samgov_entity_walk_pages_and_registers(store, tmp_path, monkeypatch):
     respx.get("https://api.sam.gov/entity-information/v3/entities").mock(side_effect=respond)
     sam = SamGovClient(store, api_key="k", daily_cap=30)
     ents = sam.walk_parent("PARENT", "LOCKHEED MARTIN")
-    assert len(ents) == 201 and calls["n"] == 3
+    assert len(ents) == 21 and calls["n"] == 3
     assert sam.quota.used_today() == 3
     assert ents[0]["source_id"] and store.get(ents[0]["source_id"]).gov_id.startswith("UEI:UEI000")
+
+
+@respx.mock
+def test_samgov_entities_by_uei_one_call_each_within_budget(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    calls: list[str] = []
+
+    def respond(request):
+        uei = request.url.params.get("ueiSAM")
+        calls.append(uei)
+        return Response(200, json={"totalRecords": 1, "entityData": [_entity(uei, "PARENT")]})
+
+    respx.get("https://api.sam.gov/entity-information/v3/entities").mock(side_effect=respond)
+    sam = SamGovClient(store, api_key="k", daily_cap=30)
+    ents = sam.entities_by_uei([f"UEI{i:03d}" for i in range(15)], max_calls=10)
+    assert len(ents) == 10 and calls == [f"UEI{i:03d}" for i in range(10)]
+    assert sam.quota.used_today() == 10
+    assert store.get(ents[3]["source_id"]).gov_id == "UEI:UEI003;CAGE:C003"
 
 
 def test_samgov_opportunities_window(store, tmp_path, monkeypatch):

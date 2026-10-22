@@ -97,8 +97,25 @@ def resolve_peers(edgar: EdgarClient, candidates: list[str], self_cik: str | Non
             t = norm_company(h["title"])
             if h["cik"] == self_cik or h["cik"] in seen:
                 continue
+            generic_first = n.split()[0] in {
+                "north",
+                "south",
+                "east",
+                "west",
+                "american",
+                "united",
+                "national",
+                "international",
+                "global",
+                "new",
+                "general",
+                "the",
+            }
             ok = t == n or (
-                len(n.split()) >= 2 and t.startswith(n) and len(t.split()) <= len(n.split()) + 1
+                not generic_first
+                and len(n.split()) >= 2
+                and t.startswith(n)
+                and len(t.split()) <= len(n.split()) + 1
             )
             if ok:
                 seen.add(h["cik"])
@@ -106,6 +123,32 @@ def resolve_peers(edgar: EdgarClient, candidates: list[str], self_cik: str | Non
                     {"name": h["title"], "ticker": h["ticker"], "cik": h["cik"], "mention": name}
                 )
                 break
+        if len(out) >= limit:
+            break
+    return out
+
+
+def unresolved_peers(candidates: list[str], resolved: list[dict], limit: int = 3) -> list[dict]:
+    """Rivals the 10-K names that have no SEC ticker (Airbus, BAE): kept as peers without a
+    CIK so the peer table can list them as 'named in the 10-K; no SEC filings'. Only names
+    that appear at least twice (or are multi-word) qualify."""
+    taken = {norm_company(r.get("mention", "")) for r in resolved}
+    taken |= {norm_company(r.get("name", "")) for r in resolved}
+    counts: dict[str, int] = {}
+    for c in candidates:
+        n = norm_company(c)
+        if not n or n in taken or n.split()[0] in {"north", "south", "united", "the", "general"}:
+            continue
+        counts[c] = counts.get(c, 0) + 1
+    out = []
+    for name, cnt in sorted(counts.items(), key=lambda kv: -kv[1]):
+        if cnt < 2 and len(name.split()) < 2:
+            continue
+        if len(name) < 4:
+            continue
+        out.append(
+            {"name": name, "ticker": None, "cik": None, "mention": name, "note": "no SEC filings"}
+        )
         if len(out) >= limit:
             break
     return out
@@ -262,7 +305,9 @@ def _filings(edgar, store, ent, as_of, found, runlog) -> None:
         }
         item1 = next((c.text for c in chunk_by_item(text) if c.item == "1"), text[:200000])
         try:
-            found["peers"] = resolve_peers(edgar, competitor_candidates(item1, ent.name), ent.cik)
+            cands = competitor_candidates(item1, ent.name)
+            found["peers"] = resolve_peers(edgar, cands, ent.cik)
+            found["peers"] += unresolved_peers(cands, found["peers"])
         except Exception as e:
             runlog.error(f"foundation peers: {e!r}")
         found["ir"]["site"] = _company_site(text)

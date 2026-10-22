@@ -26,7 +26,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from primer.clients import dod_announcements as dod
-from primer.config import section_budget, sources_config
+from primer.config import budgets_config, section_budget, sources_config
 from primer.sections import common
 from primer.sections.common import ToolContext
 from primer.sections.exhibits_sec04 import (
@@ -81,7 +81,7 @@ GAO_REPORT = re.compile(r"\bGAO-\d{2}-\d{3,7}[A-Z]{0,3}\b")
 PUBLISHED = re.compile(r"Published:?\s*([A-Z][a-z]{2,8}\.?\s+\d{1,2},\s+\d{4})")
 
 DESIGNATION_WITH_NAME = re.compile(
-    r"\b([A-Z]{1,4}-\d{1,3}[A-Z]{0,2})((?:\s+(?:[A-Z][a-z]+|[IVX]{1,4}|[A-Z]\d))*)"
+    r"\b([A-Z]{1,4}(?:/[A-Z]{1,2})?-\d{1,3}[A-Z]{0,2})((?:\s+(?:[A-Z][a-z]+|[IVX]{1,4}|[A-Z]\d))*)"
 )
 LIST_LEAD = re.compile(r"\b(?:including|such as|programs?\s+(?:include|includes|included))\b", re.I)
 ACRONYM = re.compile(r"(?<![A-Z0-9-])([A-Z][A-Z0-9]{2,7})(?![A-Z0-9-])")
@@ -168,6 +168,12 @@ GENERIC_ACRONYMS = {
     "ASC",
 }
 GENERIC_WORDS = {
+    "inc",
+    "llc",
+    "corp",
+    "co",
+    "company",
+    "corporation",
     "command",
     "control",
     "system",
@@ -230,8 +236,6 @@ GENERIC_WORDS = {
     "part",
     "table",
     "board",
-    "company",
-    "corporation",
     "department",
     "defense",
     "defence",
@@ -509,7 +513,7 @@ def program_keywords(
 
 
 def _term_regex(term: str) -> re.Pattern[str]:
-    if re.fullmatch(r"[A-Z]{1,4}-\d{1,3}", term):
+    if re.fullmatch(r"[A-Z]{1,4}(?:/[A-Z]{1,2})?-\d{1,3}", term):
         return re.compile(rf"(?<![A-Z0-9]){re.escape(term)}[A-Z]{{0,2}}(?![A-Z0-9-])")
     return re.compile(rf"(?<![A-Z0-9]){re.escape(term)}(?![A-Z0-9])")
 
@@ -694,6 +698,17 @@ def gao_finding(ctx: ToolContext, sid: str, terms: list[str]) -> dict[str, Any] 
         m = PUBLISHED.search(text)
         d = dod.parse_ap_date(m.group(1)) if m else None
         pub = d.isoformat() if d else None
+    # a program status must be current: ignore reports older than ten years (a 1983 F/A-18
+    # report is a government source, but not the program's latest finding)
+    year = None
+    if pub:
+        year = int(pub[:4])
+    elif report:
+        m2 = re.search(r"-(\d{2})-", report.group(0))
+        if m2:
+            year = 1900 + int(m2.group(1)) if int(m2.group(1)) > 50 else 2000 + int(m2.group(1))
+    if year is not None and year < ctx.as_of.year - 10:
+        return None
     return {
         "text": " ".join(found.split())[:220].rstrip(".,;") + ("…" if len(found) > 220 else ""),
         "sids": [sid],
@@ -856,9 +871,13 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
 
     # 6. SAM.gov entity walk --------------------------------------------------------------------
     res["sam"] = {"available": ctx.samgov is not None, "entities": []}
-    if ctx.samgov is not None and parent_uei:
+    if ctx.samgov is not None and uei_set:
         try:
-            ents = ctx.samgov.walk_parent(parent_uei, ctx.entity.name)
+            sam_budget = int(budgets_config().get("per_primer", {}).get("samgov_calls", 10))
+            # the UEI set is ordered by award total, so the registrations that matter most
+            # come first; one call per UEI, never a name search
+            ents = ctx.samgov.entities_by_uei(list(uei_set), max_calls=sam_budget)
+            res["sam"]["looked_up"] = min(len(uei_set), sam_budget)
             for e in ents:
                 reg = e.get("entityRegistration") or {}
                 addr = (e.get("coreData") or {}).get("physicalAddress") or {}
@@ -875,7 +894,7 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
                     }
                 )
         except Exception as e:  # noqa: BLE001
-            ctx.log(f"samgov walk_parent: {e!r}")
+            ctx.log(f"samgov entities_by_uei: {e!r}")
             res["sam"]["error"] = repr(e)[:200]
             res["notes"].append(
                 "SAM.gov entity walk failed; locations shown from award places of performance"

@@ -136,10 +136,15 @@ def _web(firecrawl_mock, usaspending_mock, sam_entities=None):
     )
     usaspending_mock.route(host="api.firecrawl.dev").mock(side_effect=fc)
     if sam_entities is not None:
+
+        def by_uei(request):
+            # the handler looks registrations up one UEI at a time (personal keys page at 10)
+            uei = request.url.params.get("ueiSAM")
+            rows = [e for e in sam_entities if e["entityRegistration"]["ueiSAM"] == uei]
+            return Response(200, json={"totalRecords": len(rows), "entityData": rows})
+
         usaspending_mock.get("https://api.sam.gov/entity-information/v3/entities").mock(
-            return_value=Response(
-                200, json={"totalRecords": len(sam_entities), "entityData": sam_entities}
-            )
+            side_effect=by_uei
         )
     return fc
 
@@ -177,7 +182,8 @@ def test_full_path_program_rule(
     foundation_calls = len(fc.calls)  # the foundation pack's own transcript searches
     d = _invoke(st)
     section_calls = fc.calls[foundation_calls:]
-    assert sum(1 for c in usaspending_mock.calls if "api.sam.gov" in str(c.request.url)) == 1
+    sam_calls = sum(1 for c in usaspending_mock.calls if "api.sam.gov" in str(c.request.url))
+    assert 1 <= sam_calls <= 10  # one call per UEI, within the per-primer SAM.gov budget
     store = EvidenceStore.for_run(st["run_dir"], as_of=AS_OF)
     md = d["markdown"]
 
