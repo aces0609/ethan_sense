@@ -380,7 +380,17 @@ def thesis_exhibit(
         r = f"{bear[i].text} [{bear[i].source_id}]" if i < len(bear) else "no sourced item"
         rows.append([b, r])
     md = md_table(["Bull case (sourced)", "Bear case (sourced)"], rows, align_right_from=99)
-    qlines = [f"- {d.firm} ({d.quarter} call): {d.question} [{d.source_id}]" for d in debates]
+    # one question per firm, newest call first, at most eight: the list is an exhibit, not prose
+    seen_firms: set[str] = set()
+    picked = []
+    for d in debates:
+        if d.firm in seen_firms:
+            continue
+        seen_firms.add(d.firm)
+        picked.append(d)
+        if len(picked) >= 8:
+            break
+    qlines = [f"- {d.firm} ({d.quarter} call): {d.question} [{d.source_id}]" for d in picked]
     questions_md = (
         "\n".join(qlines)
         if qlines

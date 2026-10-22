@@ -31,7 +31,7 @@ from primer.clients.usaspending import USAspendingClient
 from primer.config import section_budget, trade_press
 from primer.evidence.store import EvidenceStore
 from primer.graph import critic as critic_mod
-from primer.llm import invoke_structured
+from primer.llm import invoke_structured, tokens_fraction
 from primer.runlog import get_runlog
 from primer.sections.common import (
     SectionBudget,
@@ -262,7 +262,7 @@ def critic(state: ResearcherState) -> dict[str, Any]:
         "critic_notes": sc.notes,
         "critic_scores": {brief.section: entry},
     }
-    if _final(draft, sc.passed):
+    if _final(draft, sc.passed, runlog):
         out.update(
             {
                 "drafts": {brief.section: draft.model_dump(mode="json")},
@@ -274,20 +274,24 @@ def critic(state: ResearcherState) -> dict[str, Any]:
     return out
 
 
-def _final(draft: SectionDraft, passed: bool) -> bool:
+def _final(draft: SectionDraft, passed: bool, runlog=None) -> bool:
     max_loops = int(section_budget(draft.section).get("critic_loops", 2))
     return (
         passed
         or draft.iterations >= max_loops
         or draft.coverage in ("unavailable", "not_applicable")
         or os.environ.get("PRIMER_NO_CRITIC_LOOP") == "1"
+        # a second pass redrafts the whole section; keep the last 30% of the token cap for
+        # the sections still on their first pass and for key_takeaways
+        or (runlog is not None and tokens_fraction(runlog) >= 0.7)
     )
 
 
 def _after_critic(state: ResearcherState) -> str:
     draft = SectionDraft.model_validate(state["draft"])
     sc = state.get("critic_scores", {}).get(draft.section) or {}
-    return END if _final(draft, bool(sc.get("passed"))) else "plan_queries"
+    runlog = get_runlog(state["run_dir"])
+    return END if _final(draft, bool(sc.get("passed")), runlog) else "plan_queries"
 
 
 def build_researcher():

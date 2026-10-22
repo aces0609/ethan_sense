@@ -358,15 +358,23 @@ def draft_section(
     if not allowed and not facts:
         return None
     words = int(float(brief.pages) * 380)
+    cut = any(
+        ("page budget" in n.lower()) or n.lower().startswith("cut to") for n in (critic_notes or [])
+    )
+    if cut:
+        # the previous draft was over the page estimate: write well under it this time
+        words = int(float(brief.pages) * 240)
     user = (
         f"Company: {ctx.entity.name} ({ctx.entity.ticker or 'private'}); aliases: {', '.join(brief.aliases or ctx.entity.aliases)}.\n"
         f"As of: {ctx.as_of.isoformat()}. Section {brief.section}: {brief.title}.\n"
         f"Scope: {brief.scope}\nSub-questions: {'; '.join(brief.sub_questions)}\n"
         f"Required exhibit (already built, appended after your text, do not repeat it): {brief.required_exhibit}\n"
         f"Common failure to avoid: {brief.common_failure}\n"
-        f"Length: about {words} words of prose. Structure: one italic caveat line starting '*Caveat:' then "
-        f"2-4 short '###' subsections of declarative sentences, then a '### Perspectives' list of bullets "
-        f"where each bullet names the publisher or firm the view comes from (only if a cited source names it).\n"
+        f"Length: {'at most' if cut else 'about'} {words} words of prose in total; the page budget is "
+        f"{brief.pages} pages and the exhibit counts against it. Structure: one italic caveat line starting "
+        f"'*Caveat:' then 2-4 short '###' subsections of declarative sentences, then a '### Perspectives' list "
+        f"of at most 6 bullets where each bullet names the publisher or firm the view comes from (only if a "
+        f"cited source names it).\n"
         f"Citations: end every factual sentence with one or more tokens like [src_0012] drawn ONLY from the "
         f"source ids in the evidence below. Numbers must come from the evidence or the structured facts.\n"
         + (f"Additional rules: {extra_rules}\n" if extra_rules else "")
@@ -480,6 +488,10 @@ def finalize_draft(
 ) -> SectionDraft:
     """Assemble caveat + narrative + exhibit + coverage line into a SectionDraft."""
     parts: list[str] = []
+    if caveat and narrative and narrative.lstrip().startswith("*Caveat"):
+        # the drafter wrote its own caveat line; the handler's deterministic one wins
+        first, _, rest = narrative.lstrip().partition("\n")
+        narrative = rest.strip()
     if caveat:
         parts += [caveat, ""]
     if narrative:

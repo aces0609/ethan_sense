@@ -13,12 +13,18 @@ from primer.runlog import RunLog
 from primer.sections.style import CITATION_TOKEN
 from primer.state import Brief, CriticScore, SectionDraft
 
+# the agent's own recommendation or price view; an analyst's reported "Buy" rating is a
+# fact the thesis section must carry, so rating words alone are not forbidden
 FORBIDDEN = re.compile(
-    r"\b(we recommend|strong buy|buy rating|sell rating|price will|will rise to|will fall to|our view is|I think|I believe)\b",
+    r"\b(we recommend|investors should (?:buy|sell)|the stock will (?:rise|fall)|price will|will rise to|will fall to|our view is|I think|I believe|in our opinion)\b",
     re.IGNORECASE,
 )
 FIRST_PERSON = re.compile(r"\b(I|we|our|us)\b")
-FACT_SENTENCE = re.compile(r"[^.!?\n]*\d[^.!?\n]*[.!?]")
+QUOTED = re.compile(r"\"[^\"\n]{3,400}\"|\u201c[^\u201d\n]{3,400}\u201d")
+# a fact sentence may carry its citation tokens after the terminal punctuation
+FACT_SENTENCE = re.compile(
+    r"(?:[^.!?\n]|\.(?=\d))*\d(?:[^.!?\n]|\.(?=\d))*[.!?](?!\d)(?:\s*\[src_\d{4}\])*"
+)
 
 
 def score(
@@ -74,13 +80,14 @@ def score(
     if not draft.caveat and draft.coverage != "unavailable":
         style -= 1
         notes.append("no caveat line")
-    if FIRST_PERSON.search(prose):
+    unquoted = QUOTED.sub(" ", prose)  # quoted company or analyst language is not our voice
+    if FIRST_PERSON.search(unquoted):
         style -= 2
         notes.append("first person detected")
     style = max(1, style)
 
     forbidden = 5
-    if FORBIDDEN.search(prose):
+    if FORBIDDEN.search(unquoted):
         forbidden = 1
         notes.append("forbidden content: recommendation or price prediction language")
 

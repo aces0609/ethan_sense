@@ -202,7 +202,10 @@ def _expand_with_llm(
             continue
         b.scope = pb.scope or b.scope
         b.sub_questions = pb.sub_questions[:5] or b.sub_questions
-        b.web_queries = pb.web_queries[:8] or b.web_queries
+        # template queries first (stable text, so the Firecrawl cache serves them on a
+        # rerun), the planner's queries after them for the budget that remains
+        merged = list(dict.fromkeys([*b.web_queries, *pb.web_queries]))
+        b.web_queries = merged[:10]
         b.source_buckets = pb.source_buckets or b.source_buckets
         b.stop_condition = pb.stop_condition or b.stop_condition
         b.planner = model
