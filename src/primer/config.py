@@ -59,9 +59,40 @@ def market_data_budget() -> dict[str, Any]:
     return dict(budgets_config().get("market_data", {}))
 
 
+def sector_for_sic(sic: str | int | None) -> str:
+    """Sector tag for a 4-digit SIC code from config/sources.yaml `sectors`; "default" if none."""
+    try:
+        code = int(str(sic).strip())
+    except (TypeError, ValueError):
+        return "default"
+    for tag, ranges in (sources_config().get("sectors") or {}).items():
+        for r in ranges:
+            lo, _, hi = str(r).partition("-")
+            if int(lo) <= code <= int(hi or lo):
+                return tag
+    return "default"
+
+
 def trade_press(sector_tag: str) -> list[str]:
     tp = sources_config().get("trade_press", {})
     return list(tp.get(sector_tag) or tp.get("default") or [])
+
+
+def sector_brief_extras(sector_tag: str | None, section: int) -> dict[str, list[str]]:
+    """Sector-specific `web_queries` and `sub_questions` for one section, from
+    config/sources.yaml `sector_briefs`; empty lists when the sector has none."""
+    by_sector = (sources_config().get("sector_briefs") or {}).get(sector_tag or "default") or {}
+    extra = by_sector.get(section) or {}
+    return {
+        "web_queries": list(extra.get("web_queries") or []),
+        "sub_questions": list(extra.get("sub_questions") or []),
+    }
+
+
+def peer_fallbacks(sector_tag: str | None) -> list[str]:
+    """Competitor names to look for in scraped pages, from `peer_fallbacks` in sources.yaml."""
+    pf = sources_config().get("peer_fallbacks") or {}
+    return list(pf.get(sector_tag or "default") or pf.get("default") or [])
 
 
 def active_provider() -> dict[str, Any] | None:

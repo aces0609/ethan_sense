@@ -90,7 +90,20 @@ def render(
         "generator_version": __version__,
         "trace_id": run_id,
         "coverage": {str(s): coverage.get(s, "unavailable") for s in sorted(requested)},
-        "source_limits": list(sources_config().get("source_limits", [])),
+        "source_limits": [
+            *sources_config().get("source_limits", []),
+            *(
+                [
+                    sources_config().get(
+                        "private_source_limit",
+                        "Private company: no SEC financial statements; financial figures are "
+                        "press-reported and unaudited",
+                    )
+                ]
+                if entity.get("private")
+                else []
+            ),
+        ],
         "disclaimer": DISCLAIMER,
     }
     lines = [

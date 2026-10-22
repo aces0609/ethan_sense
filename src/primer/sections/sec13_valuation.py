@@ -21,6 +21,7 @@ from typing import Any
 from primer.adapters.market_data_scraped import xbrl_shares
 from primer.clients.edgar import AnnualFinancials, EdgarClient, FactValue
 from primer.evidence.store import EvidenceStore
+from primer.sections import private
 from primer.sections.common import (
     ToolContext,
     caveat_line,
@@ -189,6 +190,8 @@ def _datum_val(d: Any, basis: str, unit: str, concept: str | None = None) -> Val
 
 
 def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
+    if private.is_private(ctx.entity):
+        return private.plan_items(13, brief, ctx)
     tk, cik, as_of = ctx.entity.ticker, ctx.entity.cik, ctx.as_of.isoformat()
     peers = [p.get("ticker") for p in (ctx.foundation.get("peers") or [])[:PEER_CAP]]
     items: list[dict[str, Any]] = [
@@ -235,6 +238,8 @@ def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
 
 def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any]:
     ent, store, edgar = ctx.entity, ctx.store, ctx.edgar
+    if private.is_private(ent):
+        return private.collect_press(ctx, 13, plan_items, private.SECTION_KINDS[13])
     if not ent.cik:
         return {"error": "no CIK: company is not an SEC filer, no XBRL to derive multiples from"}
     out: dict[str, Any] = {"market_notes": []}
@@ -338,6 +343,10 @@ def draft(
     ctx: ToolContext,
     critic_notes: list[str] | None = None,
 ) -> SectionDraft:
+    if private.is_private(ctx.entity):
+        return private.draft_press_section(
+            brief, ctx, tool_results, section=13, critic_notes=critic_notes
+        )
     fin: AnnualFinancials | None = tool_results.get("financials")
     if fin is None or not fin.fiscal_years:
         return unavailable_draft(

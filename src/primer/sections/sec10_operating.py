@@ -22,6 +22,7 @@ from typing import Any
 
 from primer.clients.edgar import EdgarClient, FactValue, trailing_months
 from primer.evidence.store import EvidenceStore
+from primer.sections import private
 from primer.sections.common import (
     ToolContext,
     caveat_line,
@@ -98,6 +99,8 @@ def register_quarterly(
 
 
 def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
+    if private.is_private(ctx.entity):
+        return private.plan_items(10, brief, ctx)
     quarters = ctx.quarters()
     latest = (
         quarters[0]["label"].replace("-", " ")
@@ -145,6 +148,8 @@ def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
 
 def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any]:
     ent, store, edgar = ctx.entity, ctx.store, ctx.edgar
+    if private.is_private(ent):
+        return private.collect_press(ctx, 10, plan_items, private.SECTION_KINDS[10])
     if not ent.cik:
         return {
             "error": "no CIK: no earnings releases or XBRL quarterly facts for a private company"
@@ -334,6 +339,15 @@ def draft(
     ctx: ToolContext,
     critic_notes: list[str] | None = None,
 ) -> SectionDraft:
+    if private.is_private(ctx.entity):
+        return private.draft_press_section(
+            brief,
+            ctx,
+            tool_results,
+            section=10,
+            critic_notes=critic_notes,
+            narrative_without_data=True,
+        )
     if tool_results.get("error") and not tool_results.get("releases"):
         return unavailable_draft(brief, tool_results["error"], ctx)
     releases = tool_results.get("releases") or []

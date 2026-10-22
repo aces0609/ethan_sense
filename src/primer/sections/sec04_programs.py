@@ -56,6 +56,11 @@ DOD_SCRAPES = 3
 GAO_SCRAPES = 4
 
 GATE_REASON = "the 10-K discloses no US-government revenue"
+# private path (PLAN 3.4): a private company has no 10-K, so the gate is USAspending itself
+PRIVATE_GATE_REASON = (
+    "a private company has no 10-K to disclose US-government revenue and USAspending shows no "
+    "prime awards to the resolved recipient"
+)
 ROLE_PRIME = "prime (USAspending prime award)"
 ROLE_UNCONFIRMED = "not confirmed"
 
@@ -284,6 +289,8 @@ def _window(ctx: ToolContext) -> tuple[int, int]:
 
 
 def _gated(ctx: ToolContext) -> bool:
+    if ctx.entity.private:
+        return False  # no 10-K gate: prime awards to the resolved recipient decide (draft)
     gr = (ctx.foundation or {}).get("gov_revenue") or {}
     return not gr.get("disclosed")
 
@@ -382,10 +389,12 @@ def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
 
 
 def resolve_uei_set(
-    rows: list[dict[str, Any]], legal_name: str
+    rows: list[dict[str, Any]], legal_name: str, strict: bool = False
 ) -> tuple[list[str], dict[str, str]]:
     """UEIs whose recipient name normalises to the company name, starts with it, or looks like
-    a subsidiary (first word of the company name leads the recipient name)."""
+    a subsidiary (first word of the company name leads the recipient name). `strict` (the
+    private path) drops the first-word rule: without a 10-K naming the subsidiaries, a shared
+    first word is as likely to be another company."""
     me = norm_company(legal_name)
     first = me.split()[0] if me else ""
     ueis: dict[str, float] = {}
@@ -397,7 +406,9 @@ def resolve_uei_set(
             continue
         n = norm_company(name)
         keep = bool(n) and (
-            n == me or n.startswith(me + " ") or (bool(first) and n.split()[0] == first)
+            n == me
+            or n.startswith(me + " ")
+            or (not strict and bool(first) and n.split()[0] == first)
         )
         if not keep:
             continue
@@ -739,7 +750,9 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
         f"discovery:{'|'.join(names)}",
         seen,
     )
-    uei_set, uei_names = resolve_uei_set(disc.get("results") or [], ctx.entity.name)
+    uei_set, uei_names = resolve_uei_set(
+        disc.get("results") or [], ctx.entity.name, strict=ctx.entity.private
+    )
     res.update({"uei_set": uei_set, "uei_names": uei_names, "discovery_sid": disc_sid})
     ctx.runlog.meta["uei_set"] = list(uei_set)
     ctx.runlog.meta["uei_names"] = dict(uei_names)
@@ -1060,6 +1073,8 @@ def draft(
     if _gated(ctx) or tool_results.get("not_applicable"):
         return common.not_applicable_draft(brief, GATE_REASON, ctx)
     programs: list[dict[str, Any]] = list(tool_results.get("programs") or [])
+    if ctx.entity.private and not tool_results.get("error") and not tool_results.get("award_count"):
+        return common.not_applicable_draft(brief, PRIVATE_GATE_REASON, ctx)
     if tool_results.get("error") or not tool_results.get("award_count"):
         reason = (
             tool_results.get("error")

@@ -18,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from primer.llm import invoke_structured
+from primer.sections import private
 from primer.sections.common import (
     ToolContext,
     caveat_line,
@@ -25,6 +26,7 @@ from primer.sections.common import (
     expand_queries,
     finalize_draft,
     fmt_date,
+    md_table,
     template_digest,
     unavailable_draft,
 )
@@ -83,6 +85,84 @@ def _officers_from_model(ctx, tenk_text, tenk_sid, proxy_text, proxy_sid):
                 for o in rows[:20]
             ], label
     return [], ""
+
+
+def _draft_private(
+    brief: Brief,
+    res: dict[str, Any],
+    ctx: ToolContext,
+    critic_notes: list[str] | None,
+) -> SectionDraft:
+    """Private path: no DEF 14A, no 10-K Item 10, no SC 13D/G or Form 4. The section says so,
+    lists the people an SEC Form D names (executive officers, directors, promoters) and
+    narrates the leadership pages found by web search."""
+    store = ctx.store
+    pages = [p["sid"] for p in res.get("pages", []) if store.has(p["sid"])]
+    pages += [s for s in ctx.foundation_sources("press_release") if s not in pages]
+    forms = ((ctx.foundation.get("private") or {}).get("form_d") or {}).get("filings") or []
+    rows = []
+    form_sids = []
+    for f in forms:
+        sid = f.get("source_id")
+        if not sid or not store.has(sid):
+            continue
+        for person in f.get("related") or []:
+            rels = ", ".join(person.get("relationships") or []) or "relationship not stated"
+            rows.append([person["name"] + f" [{sid}]", rels, fmt_date(f.get("filed"))])
+            form_sids.append(sid)
+    if not pages and not rows:
+        return unavailable_draft(
+            brief,
+            "a private company files no proxy statement or Form 10-K and no page naming its "
+            "leaders was retrieved",
+            ctx,
+        )
+    exhibit_md = ""
+    if rows:
+        exhibit_md = md_table(["Name", "Relationship per Form D", "Form D filed"], rows[:20], 99)
+    notes = [
+        "no proxy statement or 10-K exists for a private company, so board independence, "
+        "beneficial ownership and executive pay are not available and leaders appear only "
+        "where a cited page or Form D names them",
+        *(res.get("notes") or []),
+    ]
+    evidence = list(dict.fromkeys([*form_sids, *pages]))
+    pbrief = brief.model_copy(
+        update={
+            "required_exhibit": "people named in SEC Form D filings, when any were found",
+            "structured_first": [],
+        }
+    )
+    narrative = draft_section(
+        ctx,
+        pbrief,
+        evidence_sids=evidence,
+        exhibit_md=exhibit_md,
+        extra_rules=(
+            "This is a private company with no proxy statement or 10-K. Name a leader only when "
+            "a cited page names that person in that role, and say the officer list is not "
+            "taken from a filing. Litigation, investigations and funding backers only from "
+            "the cited pages."
+        ),
+        critic_notes=critic_notes,
+        keywords=["chief executive", "founder", "board", "investor", "lawsuit"],
+    ) or template_digest(ctx, evidence, [])
+    return finalize_draft(
+        brief,
+        ctx,
+        caveat=caveat_line(
+            "a private company files no proxy statement or Form 10-K; the people named here "
+            "come from SEC Form D notices and from the web pages cited, not from a filed "
+            "officer list, and ownership percentages and pay are not available"
+        ),
+        narrative=narrative,
+        exhibit_md=exhibit_md,
+        exhibit_present=bool(rows),
+        claims=[],
+        coverage="partial",
+        notes=notes,
+        exhibit_title="People named in SEC Form D filings" if rows else None,
+    )
 
 
 OWNERSHIP_FORMS = ["SC 13G", "SC 13G/A", "SC 13D", "SC 13D/A"]
@@ -225,6 +305,8 @@ def draft(
     critic_notes: list[str] | None = None,
 ) -> SectionDraft:
     res = tool_results or {}
+    if private.is_private(ctx.entity):
+        return _draft_private(brief, res, ctx, critic_notes)
     proxy_sid, tenk_sid = res.get("proxy_sid"), res.get("tenk_sid")
     if not proxy_sid and not tenk_sid:
         reason = res.get("error") or "neither a DEF 14A nor a 10-K is in the foundation pack"

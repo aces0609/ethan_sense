@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from primer.clients.edgar import AnnualFinancials, FactValue
+from primer.sections import private
 from primer.sections.common import (
     ToolContext,
     caveat_line,
@@ -69,6 +70,8 @@ INSTANTS = (
 
 
 def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
+    if private.is_private(ctx.entity):
+        return private.plan_items(11, brief, ctx)
     cik, as_of = ctx.entity.cik, ctx.as_of.isoformat()
     items: list[dict[str, Any]] = [
         {
@@ -140,6 +143,8 @@ def _windows(ctx: ToolContext) -> dict[str, Any]:
 
 def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any]:
     ent, store, edgar = ctx.entity, ctx.store, ctx.edgar
+    if private.is_private(ent):
+        return private.collect_press(ctx, 11, plan_items, private.SECTION_KINDS[11])
     if not ent.cik:
         return {"error": "no CIK: company is not an SEC filer, no XBRL debt or cash facts"}
     fin = edgar.annual_financials(ent.cik, fiscal_year_end=ent.fiscal_year_end, as_of=ctx.as_of)
@@ -291,6 +296,10 @@ def draft(
     ctx: ToolContext,
     critic_notes: list[str] | None = None,
 ) -> SectionDraft:
+    if private.is_private(ctx.entity):
+        return private.draft_press_section(
+            brief, ctx, tool_results, section=11, critic_notes=critic_notes
+        )
     fin: AnnualFinancials | None = tool_results.get("financials")
     if fin is None or not fin.fiscal_years:
         return unavailable_draft(

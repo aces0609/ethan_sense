@@ -38,8 +38,25 @@ def run(
     sections: str | None = typer.Option(None, "--sections", "-s", help="e.g. '1,9' or '1-14'"),
     debug: bool = typer.Option(False, "--debug", help="Pause for review before export"),
     offline: bool = typer.Option(False, "--offline", help="Replay from cache/evidence only"),
+    private: bool = typer.Option(
+        False,
+        "--private",
+        help="Treat the company as private even if the SEC has a match: Form D, press and web "
+        "research only, sections 9, 11 and 13 press-reported and unaudited",
+    ),
+    cik: str | None = typer.Option(
+        None, "--cik", help="SEC CIK; answers the entity prompt for an ambiguous name"
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Approve plan and review prompts without asking (also the default when stdin is "
+        "not a TTY); an ambiguous company name then fails, listing the candidates",
+    ),
 ) -> None:
     """Generate a primer. Writes output/{ticker-or-slug}/{run_id}/primer.mdx and friends."""
+    from primer.graph.interrupts import InterruptRequired, make_cli_prompter
     from primer.graph.main import run_primer
     from primer.state import Inputs
 
@@ -50,17 +67,95 @@ def run(
         sections=_parse_sections(sections),
         debug=debug,
         offline=offline,
+        private=private,
+        cik=cik,
     )
-    result = run_primer(inputs)
+    try:
+        result = run_primer(inputs, on_interrupt=make_cli_prompter(yes=yes))
+    except InterruptRequired as e:  # only for an interrupt the prompter does not answer
+        typer.echo(str(e).encode("ascii", "replace").decode("ascii"), err=True)
+        raise typer.Exit(code=2) from e
     typer.echo(json.dumps(result, indent=2, default=str))
 
 
 @app.command()
 def resume(run_dir: Path = typer.Argument(..., help="output/{slug}/{run_id}")) -> None:
-    """Resume a killed run from its SQLite checkpoint."""
+    """Resume a killed run from its SQLite checkpoint: only the unfinished sections run again,
+    and run.json keeps counting (meta.resumed, section_runs.N)."""
     from primer.graph.main import resume_primer
 
     typer.echo(json.dumps(resume_primer(run_dir), indent=2, default=str))
+
+
+def _console_safe(text: str) -> str:
+    """The Windows console may not encode the primer's punctuation; never let that crash."""
+    import sys
+
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    return text.encode(enc, "replace").decode(enc, "replace")
+
+
+@app.command()
+def replay(
+    run_dir: Path = typer.Argument(..., help="output/{slug}/{run_id} of a recorded run"),
+    diff: bool = typer.Option(
+        True,
+        "--diff/--no-diff",
+        help="Compare the replayed primer, sources and claims with the original",
+    ),
+) -> None:
+    """Replay a recorded run offline: every cache read, model call and fetch comes from
+    {run_dir}/replay/ (a network call raises), evidence ids are kept, and the result is
+    written to {run_dir}-replay. Exit 0 only when the primer is identical (with --diff) and
+    nothing was missing from the recording."""
+    from primer.replay import compare_runs, replay_primer
+
+    result = replay_primer(run_dir)
+    typer.echo(f"replayed {result['original']} -> {result['replay_dir']}")
+    if result.get("error"):
+        typer.echo(_console_safe(f"replay failed: {result['error'][:300]}"))
+    if diff:
+        rep = compare_runs(result["original"], result["replay_dir"])
+    else:
+        rep = {
+            "primer_identical": None,
+            "replay_misses": result["replay_misses"],
+            "replay_llm_misses": result["replay_llm_misses"],
+            "offline_violations": result["offline_violations"],
+            "missed_keys": result["missed_keys"],
+            "missed_llm": result["missed_llm"],
+            "violation_urls": result["violation_urls"],
+            "ok": not result.get("error")
+            and not (
+                result["replay_misses"]
+                or result["replay_llm_misses"]
+                or result["offline_violations"]
+            ),
+        }
+    if diff:
+        if rep["primer_identical"]:
+            typer.echo("primer.mdx: identical")
+        else:
+            typer.echo(f"primer.mdx: {rep['diff_lines']} differing lines; first 20 diff lines:")
+            for line in rep["diff_head"]:
+                typer.echo(_console_safe(line))
+        typer.echo(f"sources.json: {'identical' if rep['sources_identical'] else 'DIFFERS'}")
+        for line in rep["sources_diff"][:5]:
+            typer.echo(_console_safe("  " + line))
+        typer.echo(f"claims.json: {'identical' if rep['claims_identical'] else 'DIFFERS'}")
+        for line in rep["claims_diff"][:5]:
+            typer.echo(_console_safe("  " + line[:200]))
+    typer.echo(
+        f"replay_misses={rep['replay_misses']} replay_llm_misses={rep['replay_llm_misses']} "
+        f"offline_violations={rep['offline_violations']}"
+    )
+    for key in rep.get("missed_keys", []):
+        typer.echo(_console_safe(f"  missed: {key}"))
+    for key in rep.get("missed_llm", []):
+        typer.echo(_console_safe(f"  missed model call: {key}"))
+    for key in rep.get("violation_urls", []):
+        typer.echo(_console_safe(f"  network attempt: {key}"))
+    raise typer.Exit(code=0 if rep["ok"] else 1)
 
 
 @app.command()
@@ -105,7 +200,10 @@ def eval(
         "citations": {
             k: v
             for k, v in result["citations"].items()
-            if k in ("ok", "rate", "unresolved", "sources", "tier1_share")
+            if k in ("ok", "rate", "unresolved", "sources", "tier1_share", "undated_share")
+        },
+        "self_consistency": {
+            k: (result.get("self_consistency") or {}).get(k) for k in ("ok", "failed")
         },
         "fact_overlap_mean": (result.get("fact_overlap") or {}).get("mean_rate"),
         "financials_exact_match_rate": (result.get("financials") or {}).get("exact_match_rate"),
@@ -120,7 +218,61 @@ def eval(
     ok = result["all_sections_at_least_3"] and (result["citations"].get("ok") is not False)
     if result.get("financials") and result["financials"].get("exact_match_rate") not in (None, 1.0):
         ok = False
+    if golden is None and (result.get("self_consistency") or {}).get("ok") is False:
+        ok = False  # no reference to compare with: the run's own numbers must hold together
     raise typer.Exit(code=0 if ok else 1)
+
+
+@app.command("eval-set")
+def eval_set(
+    run: bool = typer.Option(
+        False,
+        "--run",
+        help="Execute run_primer for each entry first (sequential; costs tokens and credits)",
+    ),
+    only: list[str] | None = typer.Option(
+        None, "--only", help="Ticker or name slug; repeat the option or comma-separate"
+    ),
+    config: Path | None = typer.Option(
+        None, "--config", help="Eval set (default config/eval.yaml)"
+    ),
+    out: Path | None = typer.Option(None, "--out", help="Report directory (default output/eval)"),
+) -> None:
+    """Score the eval set (config/eval.yaml): one row per company with the gate, coverage,
+    critic and judge scores, fact overlap, financial match, source quality, cost and the
+    entry's expectations. Without --run it evaluates the newest existing run of each entry.
+    Writes output/eval/eval-set-{date}.json and .md; exits 1 when any entry fails."""
+    from primer.eval.eval_set import (
+        evaluate_set,
+        filter_entries,
+        load_eval_set,
+        write_report,
+    )
+
+    es = load_eval_set(config)
+    try:
+        entries = filter_entries(es.entries, only)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=2) from None
+    out_dir = out or (output_root() / "eval")
+    report = evaluate_set(
+        entries, es.defaults, run=run, out_dir=out_dir, log=lambda s: typer.echo(s, err=True)
+    )
+    jp, mp = write_report(report, out_dir)
+    for r in report["entries"]:
+        if r.get("skipped"):
+            typer.echo(f"  {r['id']:<8} {'FAIL' if not r['ok'] else 'skipped'}  {r['reason']}")
+            continue
+        j = r["judge"]
+        typer.echo(
+            f"  {r['id']:<8} {'ok  ' if r['ok'] else 'FAIL'} gate={r['gate']['passed']} "
+            f"judge={j['min']}/{j['mean']} ({j['mode']}) cov={r['coverage']}"
+        )
+        for f in r["failures"]:
+            typer.echo("           - " + f.encode("ascii", "replace").decode("ascii"))
+    typer.echo(f"report: {jp}\n        {mp}")
+    raise typer.Exit(code=0 if report["ok"] else 1)
 
 
 @app.command("mdx-check")

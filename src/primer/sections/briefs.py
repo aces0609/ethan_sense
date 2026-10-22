@@ -6,7 +6,7 @@ only section 9 is executed by the Phase 1 graph.
 
 from __future__ import annotations
 
-from primer.config import section_budget
+from primer.config import section_budget, sector_brief_extras
 from primer.state import SECTION_TITLES, Brief
 
 _TEMPLATES: dict[int, dict] = {
@@ -38,15 +38,10 @@ _TEMPLATES: dict[int, dict] = {
             "{co} product roadmap",
             "{co} new product launch {fy}",
             "{co} technology differentiation",
-            "{co} sixth-generation fighter",
-            "{co} NGAD OR F-47 OR F/A-XX",
-            "{co} shadow factory OR production line OR rate break",
         ],
         sub_questions=[
             "Which products and programs does the 10-K list by segment, and what is the status and key metric of each?",
-            "Which next-generation platform awards or sixth-generation programs has the company won, lost or bid on, and when?",
-            "What production-system or factory changes (new lines, shadow factories, rate breaks) are dated in company releases or trade press?",
-            "Which products have a certification, first-delivery or entry-into-service date within the window?",
+            "Which products have a certification, regulatory approval, first-delivery or launch date within the window?",
         ],
         required_exhibit="Product/program table with status and key metric",
         common_failure="Marketing copy cited as fact; no competitor comparison.",
@@ -281,13 +276,11 @@ _TEMPLATES: dict[int, dict] = {
             "{co} regulator approval",
             "{co} certification OR approval {fy}",
             "{co} deliveries {fy}",
-            "{co} contract conversion OR definitization OR multiyear award {fy}",
         ],
         sub_questions=[
             "Which 8-K filings, releases and news items fall inside the trailing 12 months, newest first?",
             "Which certifications or regulator approvals were granted or withheld in the window, and on what date?",
             "What delivery or shipment figures did the company report in the window, by period?",
-            "Which contracts were converted, definitized or awarded as multiyear in the window, and for what value?",
         ],
         required_exhibit="Dated event log, newest first, with one-line implication",
         common_failure="Recency not enforced; press-release language copied as analysis.",
@@ -296,8 +289,15 @@ _TEMPLATES: dict[int, dict] = {
 
 
 def brief_for(
-    section: int, co: str, fy: int | None = None, aliases: list[str] | None = None
+    section: int,
+    co: str,
+    fy: int | None = None,
+    aliases: list[str] | None = None,
+    sector_tag: str | None = None,
 ) -> Brief:
+    """The §6 template for a section. Sector-specific queries and sub-questions (defense
+    programs, pharma pipeline, ...) come from config/sources.yaml `sector_briefs` for
+    `sector_tag`, appended after the generic ones, so the generic brief is sector-neutral."""
     t = _TEMPLATES[section]
     budget = section_budget(section)
     subs = {
@@ -308,12 +308,14 @@ def brief_for(
         "quarter": "{quarter}",
         "metric": "{metric}",
     }
-    queries = [q.format(**subs).strip() for q in t["web_queries"]]
+    extra = sector_brief_extras(sector_tag, section)
+    queries = [q.format(**subs).strip() for q in [*t["web_queries"], *extra["web_queries"]]]
     sub_questions = [s.format(**subs) for s in t.get("sub_questions", [])] or [
         f"What does the primary evidence say about: {t['scope']}",
         f"What exhibit data supports: {t['required_exhibit']}",
         f"What is the most common failure to avoid: {t['common_failure']}",
     ]
+    sub_questions += [s.format(**subs) for s in extra["sub_questions"]]
     return Brief(
         section=section,
         title=SECTION_TITLES[section],
@@ -330,6 +332,10 @@ def brief_for(
 
 
 def all_briefs(
-    co: str, fy: int | None, sections: list[int], aliases: list[str] | None = None
+    co: str,
+    fy: int | None,
+    sections: list[int],
+    aliases: list[str] | None = None,
+    sector_tag: str | None = None,
 ) -> dict[int, Brief]:
-    return {s: brief_for(s, co, fy, aliases) for s in sections if s in _TEMPLATES}
+    return {s: brief_for(s, co, fy, aliases, sector_tag) for s in sections if s in _TEMPLATES}

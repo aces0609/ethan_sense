@@ -17,6 +17,7 @@ from primer.clients.edgar import AnnualFinancials, EdgarClient
 from primer.evidence.store import EvidenceStore
 from primer.llm import invoke_text
 from primer.runlog import RunLog
+from primer.sections import private
 from primer.sections.common import ToolContext
 from primer.sections.exhibits import financial_tables
 from primer.sections.exhibits_sec13 import NET_DEBT_FORMULA, net_debt_formula
@@ -27,6 +28,8 @@ GATE_METRICS = ("revenue", "net_income", "operating_cash_flow", "capex")
 
 
 def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
+    if private.is_private(ctx.entity):
+        return private.plan_items(9, brief, ctx)
     entity, as_of = ctx.entity, ctx.as_of
     return [
         {
@@ -43,6 +46,8 @@ def plan(brief: Brief, ctx: ToolContext) -> list[dict[str, Any]]:
 
 def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any]:
     entity, store, edgar = ctx.entity, ctx.store, ctx.edgar
+    if private.is_private(entity):
+        return private.collect_press(ctx, 9, plan_items, private.SECTION_KINDS[9])
     if not entity.cik:
         return {"error": "no CIK: company is not an SEC filer", "financials": None}
     item = next((i["args"] for i in plan_items if i.get("tool") == "edgar.annual_financials"), None)
@@ -114,6 +119,10 @@ def draft(
     critic_notes: list[str] | None = None,
 ) -> SectionDraft:
     entity, runlog = ctx.entity, ctx.runlog
+    if private.is_private(entity):
+        return private.draft_press_section(
+            brief, ctx, tool_results, section=9, critic_notes=critic_notes
+        )
     fin: AnnualFinancials | None = tool_results.get("financials")
     if fin is None or not fin.fiscal_years:
         reason = tool_results.get("error") or "no annual XBRL facts available"

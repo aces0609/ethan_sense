@@ -1,0 +1,110 @@
+# The eval set (PLAN 3.5, requirements §7): the companies `primer eval-set` runs and scores.
+#
+# Each entry:
+#   name        company name passed to `primer run --company`
+#   ticker      ticker, or null for a name-only (private) run; it also names the output folder
+#               (output/{TICKER}/ or output/{slug-of-name}/) and is what `--only` matches
+#   kind        golden: a reference primer exists (the judge and fact overlap compare against it)
+#               rubric: no reference; the judge scores against the cited sources and the rubric,
+#               and a self-consistency block checks the run's own numbers
+#   golden      reference primer, relative to the repo root (GOLDEN_DIR overrides the folder).
+#               The .md/.pdf references are licensed and never committed; when the file is
+#               missing the entry is scored as a rubric entry and the row says so.
+#   golden_financials   optional JSON of section-9 figures to match to the dollar
+#   flags       Inputs fields for the run: private, offline, debug
+#   as_of       YYYY-MM-DD; omit for the run date
+#   sections    e.g. "1-14" or "1,9"; omit for all
+#   sector      label for the table
+#   note        free text carried into the report
+#   expect      checks on the finished run (all must hold):
+#                 section<N>: coverage status, or a list of acceptable statuses
+#                 fiscal_year_end: "0926"        entity fiscal year end (MMDD, quote it)
+#                 sector_tag: technology         tag resolve_entity assigned from the SIC code
+#                 is_public: true|false
+#                 gate: pass|fail                the validation gate
+#                 self_consistency: pass|fail    balance-sheet / FCF / revenue / FY-label checks
+#                 min_judge_mean, min_judge_min, financials_exact (>= value),
+#                 max_undated_share, min_tier1_share (numbers)
+#
+# Adding a company is a new entry here and nothing else. Adding a sector is a sources.yaml
+# change (sectors, trade_press, sector_briefs, peer_fallbacks).
+
+defaults:
+  # a section the judge model scores below this fails the entry (applies when a judge model is
+  # configured; the template-mode fallback reads the deterministic critic scores instead)
+  judge_min: 3.0
+  # an entry fails when its self-consistency block fails (rubric entries; golden entries are
+  # compared with the reference instead)
+  require_self_consistency_for: [rubric]
+
+entries:
+  - name: Lockheed Martin
+    ticker: LMT
+    kind: golden
+    golden: docs/golden/lmt.md
+    golden_financials: docs/golden/lmt_financials.json
+    flags: {}
+    as_of: "2026-10-21"
+    sector: aerospace_defense
+    expect:
+      sector_tag: aerospace_defense
+      fiscal_year_end: "1231"
+      section4: [full, partial]
+      section9: full
+
+  - name: Boeing
+    ticker: BA
+    kind: golden
+    golden: docs/golden/ba.md
+    flags: {}
+    as_of: "2026-10-21"
+    sector: aerospace_defense
+    expect:
+      sector_tag: aerospace_defense
+      fiscal_year_end: "1231"
+      section9: full
+
+  - name: SpaceX
+    ticker: null
+    kind: golden
+    golden: docs/golden/spacex.md
+    flags:
+      private: true
+    as_of: "2026-10-21"
+    sector: aerospace_defense
+    note: >-
+      Listed after its IPO but exercised as a private company: the point of the entry is the
+      private-company path, where sections 9, 11 and 13 must report partial or unavailable
+      rather than invent financials.
+    expect:
+      is_public: false
+      section9: [partial, unavailable]
+      section11: [partial, unavailable]
+      section13: [partial, unavailable]
+
+  - name: Apple
+    ticker: AAPL
+    kind: rubric
+    flags: {}
+    sector: technology
+    note: September fiscal year end; no disclosed US-government revenue, so section 4 is not applicable.
+    expect:
+      sector_tag: technology
+      fiscal_year_end: "0926"
+      section4: not_applicable
+      section9: full
+      self_consistency: pass
+
+  - name: Pfizer
+    ticker: PFE
+    kind: rubric
+    flags: {}
+    sector: pharma_biotech
+    note: December fiscal year end; acquisition-heavy, with some US-government contracts.
+    expect:
+      sector_tag: pharma_biotech
+      fiscal_year_end: "1231"
+      section4: [full, partial]
+      section7: [full, partial]
+      section9: full
+      self_consistency: pass

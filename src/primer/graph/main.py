@@ -31,9 +31,15 @@ from pydantic import BaseModel, Field
 
 from primer import __version__
 from primer.clients.edgar import EdgarClient
-from primer.config import llm_available, output_root, role_model, trade_press
+from primer.config import (
+    llm_available,
+    output_root,
+    role_model,
+    trade_press,
+)
 from primer.evidence.store import EvidenceStore
 from primer.graph.foundation import build_foundation
+from primer.graph.interrupts import InterruptRequired, OnInterrupt, drive  # noqa: F401
 from primer.graph.reconcile import reconcile_drafts
 from primer.graph.researcher import build_researcher
 from primer.llm import invoke_structured, invoke_text
@@ -47,21 +53,6 @@ from primer.validate.numeric import check_numeric
 from primer.validate.takeaways import check_takeaways
 
 RESEARCHER = build_researcher()
-
-AEROSPACE_SIC = {
-    "3720",
-    "3721",
-    "3724",
-    "3728",
-    "3760",
-    "3761",
-    "3764",
-    "3769",
-    "3812",
-    "3795",
-    "3480",
-    "3489",
-}
 
 
 def slugify(s: str) -> str:
@@ -86,6 +77,13 @@ def new_run(inputs: Inputs) -> tuple[str, Path]:
 def intake(state: PrimerState) -> dict[str, Any]:
     inputs = Inputs.model_validate(state["inputs"])
     runlog = get_runlog(state["run_dir"])
+    # save the inputs (inputs.json) and switch the record layer on: every cache hit/put and
+    # model outcome of this run is copied to run_dir/replay/ for `primer replay` (3.3)
+    from primer.replay import start_recording
+
+    start_recording(state["run_dir"], inputs, state["run_id"])
+    if inputs.replay:
+        runlog.meta["replay_of"] = inputs.replay_of
     runlog.meta.update(
         {
             "run_id": state["run_id"],
@@ -103,6 +101,13 @@ def intake(state: PrimerState) -> dict[str, Any]:
 
 
 def resolve_entity(state: PrimerState) -> dict[str, Any]:
+    """ticker -> CIK; name-only -> SEC ticker-file search; no match (or `--private`) -> the
+    private path. Two or more close name matches pause the graph on a `choose_entity`
+    interrupt (PLAN 3.8); `Inputs.cik` answers it up front."""
+    from langgraph.types import interrupt
+
+    from primer.graph import entity as ent_mod
+
     inputs = Inputs.model_validate(state["inputs"])
     runlog = get_runlog(state["run_dir"])
     edgar = EdgarClient(runlog=runlog, offline=inputs.offline)
@@ -110,43 +115,44 @@ def resolve_entity(state: PrimerState) -> dict[str, Any]:
 
     with runlog.timed("resolve_entity"):
         match = None
-        if inputs.ticker:
+        private_reason = None
+        if inputs.private:
+            # honour --private: skip every SEC call, but say which SEC match was ignored
+            ignored = ent_mod.sec_match_for_record(edgar, inputs, runlog)
+            private_reason = "--private"
+            runlog.meta["private_path"] = {
+                "reason": private_reason,
+                "sec_match_ignored": (
+                    {k: ignored.get(k) for k in ("cik", "ticker", "title", "exchange")}
+                    if ignored
+                    else None
+                ),
+                "ticker_ignored": inputs.ticker,
+            }
+        elif inputs.ticker:
             match = edgar.resolve_ticker(inputs.ticker)
             if match is None:
                 runlog.error(f"ticker {inputs.ticker} not found in SEC ticker file")
+        elif inputs.cik:
+            match = ent_mod.lookup_cik(edgar, inputs.cik)
         else:
-            hits = edgar.search_company_name(inputs.company_name)
-            if len(hits) == 1 or (len(hits) > 1 and hits[0]["score"] >= 2 * hits[1]["score"]):
+            hits = ent_mod.name_hits(edgar, inputs.company_name)
+            if not hits:
+                private_reason = "no SEC match for the company name"
+            elif not ent_mod.needs_choice(hits):
                 match = hits[0]
-            elif len(hits) > 1:
-                raise ValueError(
-                    "ambiguous company name; candidates: "
-                    + "; ".join(f"{h['title']} ({h['ticker']}, CIK {h['cik']})" for h in hits[:5])
-                    + ". Pass --ticker."
-                )
-        if match:
+            else:
+                answer = interrupt(ent_mod.candidates_payload(hits))
+                match = ent_mod.resolve_choice(answer, hits, edgar)
+                if match is None:
+                    private_reason = "chosen at the entity prompt"
+            if private_reason:
+                runlog.meta["private_path"] = {"reason": private_reason, "sec_match_ignored": None}
+        if private_reason:
+            ent = ent_mod.private_entity(inputs)
+        elif match:
             subs = edgar.submissions(match["cik"])
-            ent.cik = match["cik"]
-            ent.ticker = ent.ticker or match.get("ticker")
-            ent.name = subs.get("name") or match["title"]
-            ent.is_public = True
-            ent.exchange = match.get("exchange") or (subs.get("exchanges") or [None])[0]
-            ent.fiscal_year_end = subs.get("fiscalYearEnd") or None
-            ent.sic = str(subs.get("sic") or "") or None
-            ent.state_of_incorporation = subs.get("stateOfIncorporation") or None
-            ent.sector_tag = "aerospace_defense" if ent.sic in AEROSPACE_SIC else "default"
-            aliases = {inputs.company_name}
-            for fn in subs.get("formerNames", []) or []:
-                if fn.get("name"):
-                    aliases.add(fn["name"])
-            short = re.sub(
-                r"\b(corp|corporation|inc|incorporated|co|company|ltd|plc|holdings?)\b\.?",
-                "",
-                ent.name,
-                flags=re.I,
-            )
-            aliases.add(re.sub(r"\s+", " ", short).strip(" ,"))
-            ent.aliases = sorted(a for a in aliases if a and a != ent.name)
+            ent = ent_mod.apply_sec_match(ent, match, subs, inputs.company_name)
     runlog.meta["entity"] = ent.model_dump(mode="json")
     return {"entity": ent.model_dump(mode="json")}
 
@@ -230,7 +236,7 @@ def plan_sections(state: PrimerState) -> dict[str, Any]:
     fy = int(found.get("fy") or (as_of.year - 1))
     researched = [s for s in inputs.sections if s != 1]
     co = ent.aliases[0] if ent.aliases else ent.name
-    briefs = all_briefs(co, fy, researched, ent.aliases)
+    briefs = all_briefs(co, fy, researched, ent.aliases, ent.sector_tag)
     tp = trade_press(ent.sector_tag)
     for b in briefs.values():
         b.aliases = list(ent.aliases)
@@ -655,8 +661,18 @@ def open_checkpointer(run_dir: Path) -> SqliteSaver:
 
 
 def run_primer(
-    inputs: Inputs, run_id: str | None = None, run_dir: Path | None = None
+    inputs: Inputs,
+    run_id: str | None = None,
+    run_dir: Path | None = None,
+    on_interrupt: OnInterrupt | None = None,
 ) -> dict[str, Any]:
+    """Run the main graph to the end.
+
+    The graph pauses on three interrupts (entity choice, plan approval and review in debug
+    mode). `on_interrupt(payload) -> answer` supplies each answer: a CIK or ticker for
+    `{"type": "choose_entity", ...}`, "approve" or a rejection string for the debug ones.
+    Without a callback a pause raises `InterruptRequired` (payload and run directory on the
+    exception); `primer.graph.interrupts.answer_interrupt` resumes it later."""
     if run_id is None or run_dir is None:
         run_id, run_dir = new_run(inputs)
     runlog = get_runlog(run_dir)
@@ -669,7 +685,15 @@ def run_primer(
         "run_dir": str(run_dir),
     }
     with runlog.timed("total"):
-        final = graph.invoke(init, config=config)
+        final = drive(
+            graph,
+            init,
+            config,
+            run_dir=run_dir,
+            run_id=run_id,
+            on_interrupt=on_interrupt,
+            runlog=runlog,
+        )
     runlog.write()
     return {
         "run_id": run_id,
@@ -677,20 +701,41 @@ def run_primer(
         "mdx_path": final.get("mdx_path"),
         "validation": final.get("validation"),
         "coverage": final.get("coverage"),
+        "errors": final.get("errors"),
         "sections": {s: SECTION_TITLES[int(s)] for s in final.get("drafts", {})},
     }
 
 
 def resume_primer(run_dir: Path) -> dict[str, Any]:
-    """Resume a killed run from its checkpoint (same thread_id = run_id)."""
+    """Resume a killed run from its checkpoint (same thread_id = run_id).
+
+    Works across processes: run.json is reloaded by get_runlog (cumulative counters, tokens
+    and timings, meta.resumed bumped), the sibling sections that finished before the kill are
+    restored from the checkpoint's pending writes and are not re-run, and the record layer
+    (or, for a replay run, the replay layer) is switched back on before the graph continues.
+    `section_runs.{n}` in run.json counts how often each section researcher started.
+    """
+    from primer.replay import session_for_resume
+
+    run_dir = Path(run_dir)
     run_id = run_dir.name
-    graph = build_main(open_checkpointer(run_dir))
-    config = {"configurable": {"thread_id": run_id}, "recursion_limit": 100}
-    final = graph.invoke(None, config=config)
-    get_runlog(run_dir).write()
+    runlog = get_runlog(run_dir)
+    runlog.mark_resumed()
+    with session_for_resume(run_dir):
+        graph = build_main(open_checkpointer(run_dir))
+        config = {"configurable": {"thread_id": run_id}, "recursion_limit": 100}
+        with runlog.timed("total"):
+            final = graph.invoke(None, config=config)
+        runlog.write()
     return {
         "run_id": run_id,
         "run_dir": str(run_dir),
         "mdx_path": final.get("mdx_path"),
         "validation": final.get("validation"),
+        "resumed": runlog.meta.get("resumed"),
+        "section_runs": {
+            k.split(".", 1)[1]: v
+            for k, v in runlog.counters.items()
+            if k.startswith("section_runs.")
+        },
     }

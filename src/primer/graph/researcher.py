@@ -178,6 +178,10 @@ def llm_queries(brief: Brief, ctx: ToolContext, critic_notes: list[str] | None) 
 def plan_queries(state: ResearcherState) -> dict[str, Any]:
     brief = Brief.model_validate(state["brief"])
     ctx = build_context(state, brief.section)
+    if int(state.get("iteration", 0)) == 0:
+        # one count per researcher start (a critic pass is not a restart); a resumed run shows
+        # which sections executed again (3.2 kill-test)
+        ctx.runlog.count(f"section_runs.{brief.section}")
     handler = handler_for(brief.section)
     if handler is None:
         return {"plan_items": [], "budget": ctx.budget.__dict__ | {"notes": []}}

@@ -91,11 +91,30 @@ NOT_FIRMS = {
 }
 
 
+# Press-reported figures of a private company (PLAN 3.4) and SEC Form D notices carry these
+# metric prefixes. They are labelled unaudited and tier-tagged in the table, they are not
+# audited statement metrics, so the tier rule does not ask for companyfacts; but they must
+# still cite a fetched source.
+PRESS_PREFIXES = ("press_", "form_d_")
+
+
 def check_tier(claims: list[dict[str, Any]], store: EvidenceStore) -> dict:
-    """A statement number cited only to tier-2 pages when companyfacts has the concept is flagged."""
+    """A statement number cited only to tier-2 pages when companyfacts has the concept is flagged.
+
+    Press-reported private-company datapoints (`press_*`, `form_d_*`) are exempt from the tier
+    preference; one with no resolvable source id is reported in `press_unsourced` and fails
+    the check."""
     statement_metrics = {m for stmt in concepts_config()["statements"].values() for m in stmt}
     flagged = []
+    unsourced = []
     for c in claims:
+        if c["metric"].startswith(PRESS_PREFIXES):
+            sids = c.get("source_ids") or []
+            if not sids or not all(store.has(s) for s in sids):
+                unsourced.append(
+                    {"metric": c["metric"], "period": c["period"], "section": c["section"]}
+                )
+            continue
         if c["metric"] not in statement_metrics or not c.get("source_ids"):
             continue
         tiers = {store.get(s).tier for s in c["source_ids"] if store.has(s)}
@@ -108,7 +127,7 @@ def check_tier(claims: list[dict[str, Any]], store: EvidenceStore) -> dict:
                     "tiers": sorted(tiers),
                 }
             )
-    return {"ok": not flagged, "flagged": flagged}
+    return {"ok": not flagged and not unsourced, "flagged": flagged, "press_unsourced": unsourced}
 
 
 def _is_company_person(name: str, sections_md: dict[int, str]) -> bool:

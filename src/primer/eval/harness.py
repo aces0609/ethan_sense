@@ -12,6 +12,11 @@ critic scores recorded in run.json and says so (`judge: template`).
 Golden primer sections are matched to ours by heading keywords, since the AlphaSense
 numbering differs (see PLAN.md §7).
 
+A golden primer is optional (PLAN 3.5): without one the judge scores each section against the
+cited sources and the rubric only, there is no fact overlap, and a `self_consistency` block
+checks the run's own section-9 numbers (balance-sheet identity, FCF = OCF - capex, positive
+revenue, consecutive fiscal-year labels).
+
 `primer eval --run-dir … [--golden lmt.md] [--golden-financials lmt_financials.json]` writes
 output/eval/scorecard-{run_id}.json.
 """
@@ -323,6 +328,11 @@ def citation_resolvability(run_dir: Path) -> dict[str, Any]:
         "tier1_share": round(sum(1 for s in sources.values() if s.get("tier") == 1) / n, 3)
         if n
         else None,
+        "undated_share": round(
+            sum(1 for s in sources.values() if not s.get("published_date")) / n, 3
+        )
+        if n
+        else None,
     }
 
 
@@ -340,7 +350,8 @@ class RubricScore(BaseModel):
     accuracy_vs_reference: int = Field(
         ge=1,
         le=5,
-        description="agreement with the reference where both state a fact; 3 when no reference",
+        description="agreement with the reference where both state a fact, or with the cited "
+        "sources when no reference is given; 3 when neither is available",
     )
     reason: str = Field(description="one or two sentences")
 
@@ -352,14 +363,22 @@ JUDGE_SYSTEM = (
     "exhibit (the required table is present and populated), style (caveat line, declarative "
     "prose, named-source perspectives, no first person), forbidden content (5 means no "
     "recommendation and no price prediction stated as the author's own view), and accuracy "
-    "versus the reference section when one is given (3 when none). Be strict but fair: a "
+    "versus the reference section when one is given, else versus the excerpts of the cited "
+    "sources when those are given (3 when neither). Be strict but fair: a "
     "section that honestly marks a gap as partial should not lose points for the gap itself."
 )
 
 
 def judge_section(
-    section: int, markdown: str, reference: str | None, runlog=None
+    section: int,
+    markdown: str,
+    reference: str | None,
+    runlog=None,
+    sources: str | None = None,
 ) -> dict[str, Any]:
+    """Score one section. With a `reference` the judge compares against it; without one
+    (a rubric entry of the eval set) it scores against the rubric and the excerpts of the
+    sources the section cites, which is all the evidence the drafter had."""
     user = (
         f"Section {section}: {SECTION_TITLES.get(section, '')}\n\n"
         f"--- Generated section ---\n{markdown[:14000]}\n\n"
@@ -367,6 +386,11 @@ def judge_section(
             f"--- Reference section (AlphaSense) ---\n{reference[:10000]}\n"
             if reference
             else "--- No reference section available ---\n"
+        )
+        + (
+            f"\n--- Excerpts of the sources this section cites ---\n{sources[:14000]}\n"
+            if sources and not reference
+            else ""
         )
     )
     out = invoke_structured("judge", RubricScore, JUDGE_SYSTEM, user, runlog)
@@ -411,6 +435,143 @@ def judge_from_runlog(run_dir: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
+def section_sources(run_dir: Path, section: int, per_source: int = 1500, total: int = 14000) -> str:
+    """Excerpts of the sources section `section` cites (sources.json `cited_by`), headed by
+    id, title, publisher and date: the evidence a reference-free judge scores against."""
+    sp = Path(run_dir) / "sources.json"
+    if not sp.exists():
+        return ""
+    rows = json.loads(sp.read_text(encoding="utf-8")).get("sources", [])
+    parts: list[str] = []
+    used = 0
+    for r in rows:
+        if f"sec-{section}" not in (r.get("cited_by") or []):
+            continue
+        ep = Path(run_dir) / r.get("evidence_path", "")
+        body = ep.read_text(encoding="utf-8", errors="replace")[:per_source] if ep.is_file() else ""
+        block = (
+            f"### [{r.get('source_id')}] {r.get('title')} — {r.get('publisher')}, "
+            f"{r.get('published_date') or 'n.d.'} (tier {r.get('tier')})\n{body}\n"
+        )
+        if used + len(block) > total:
+            break
+        parts.append(block)
+        used += len(block)
+    return "\n".join(parts)
+
+
+# ---- v1: self-consistency (no golden primer needed) --------------------------------------------
+
+IDENTITY_TOLERANCE = 0.005
+
+
+def _period_year(period: str) -> int | None:
+    m = re.fullmatch(r"FY(\d{4})", str(period))
+    return int(m.group(1)) if m else None
+
+
+def self_consistency(run_dir: Path, tolerance: float = IDENTITY_TOLERANCE) -> dict[str, Any]:
+    """Internal checks on the run's section-9 claims, for entries with no golden primer:
+
+    - balance sheet: total_assets = total_liabilities + stockholders_equity within 0.5% per FY
+      (noncontrolling interest is the usual, small, reason for a gap);
+    - free_cash_flow = operating_cash_flow - capex per FY (to the dollar, 0.5 tolerance);
+    - revenue is positive in every FY;
+    - fiscal-year labels of the annual claims are consecutive.
+
+    A check whose inputs are not in the run is `skipped`, never failed. `ok` is false only when
+    a check ran and failed."""
+    claims = [c for c in load_claims(Path(run_dir)) if c.get("section") == 9]
+    by: dict[str, dict[str, float]] = {}
+    for c in claims:
+        fy = _period_year(c.get("period", ""))
+        if fy is not None:
+            by.setdefault(c["metric"], {})[f"FY{fy}"] = float(c["value"])
+
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, status: str, detail: str = "", rows: list[dict[str, Any]] | None = None):
+        checks.append({"name": name, "status": status, "detail": detail, "rows": rows or []})
+
+    a, li, eq = (
+        by.get(k, {}) for k in ("total_assets", "total_liabilities", "stockholders_equity")
+    )
+    years = sorted(set(a) & set(li) & set(eq))
+    if years:
+        bad = []
+        for fy in years:
+            gap = abs(a[fy] - (li[fy] + eq[fy]))
+            rel = gap / abs(a[fy]) if a[fy] else float("inf")
+            if rel > tolerance:
+                bad.append(
+                    {
+                        "period": fy,
+                        "assets": a[fy],
+                        "liabilities_plus_equity": li[fy] + eq[fy],
+                        "gap_pct": round(rel * 100, 3),
+                    }
+                )
+        add(
+            "balance_sheet_identity",
+            "fail" if bad else "pass",
+            f"assets = liabilities + equity within {tolerance:.1%} for {len(years)} FY",
+            bad,
+        )
+    else:
+        add("balance_sheet_identity", "skipped", "assets, liabilities and equity not all present")
+
+    f, o, cx = (by.get(k, {}) for k in ("free_cash_flow", "operating_cash_flow", "capex"))
+    years = sorted(set(f) & set(o) & set(cx))
+    if years:
+        bad = [
+            {"period": fy, "fcf": f[fy], "ocf_minus_capex": o[fy] - cx[fy]}
+            for fy in years
+            if abs(f[fy] - (o[fy] - cx[fy])) >= 0.5
+        ]
+        add(
+            "fcf_identity",
+            "fail" if bad else "pass",
+            f"free cash flow = operating cash flow - capex for {len(years)} FY",
+            bad,
+        )
+    else:
+        add(
+            "fcf_identity",
+            "skipped",
+            "free cash flow, operating cash flow and capex not all present",
+        )
+
+    rev = by.get("revenue", {})
+    if rev:
+        bad = [{"period": fy, "revenue": v} for fy, v in sorted(rev.items()) if not v > 0]
+        add("revenue_positive", "fail" if bad else "pass", f"revenue > 0 for {len(rev)} FY", bad)
+    else:
+        add("revenue_positive", "skipped", "no revenue claims")
+
+    labels = sorted({int(fy[2:]) for m in by.values() for fy in m})
+    if len(labels) >= 2:
+        gaps = [
+            {"after": f"FY{x}", "next": f"FY{y}"}
+            for x, y in zip(labels, labels[1:], strict=False)
+            if y - x != 1
+        ]
+        add(
+            "fiscal_year_labels_consecutive",
+            "fail" if gaps else "pass",
+            f"FY labels {labels[0]}-{labels[-1]}",
+            gaps,
+        )
+    else:
+        add("fiscal_year_labels_consecutive", "skipped", "fewer than two fiscal years")
+
+    return {
+        "ok": not any(c["status"] == "fail" for c in checks),
+        "ran": sum(1 for c in checks if c["status"] != "skipped"),
+        "failed": [c["name"] for c in checks if c["status"] == "fail"],
+        "checks": checks,
+    }
+
+
 # ---- v1: scorecard -----------------------------------------------------------------------------
 
 
@@ -438,7 +599,9 @@ def scorecard(
         for sec in sorted(ours):
             if sections and sec not in sections:
                 continue
-            j = judge_section(sec, ours[sec], theirs.get(sec), runlog)
+            ref = theirs.get(sec)
+            src = None if ref else section_sources(run_dir, sec)
+            j = judge_section(sec, ours[sec], ref, runlog, src)
             if j:
                 judge[str(sec)] = j
     if not judge:
@@ -459,6 +622,7 @@ def scorecard(
         "all_sections_at_least_3": bool(means) and min(means) >= 3.0,
         "citations": citation_resolvability(run_dir),
     }
+    result["self_consistency"] = self_consistency(run_dir)
     if golden_text:
         result["fact_overlap"] = fact_overlap(primer_md, golden_text)
     if golden_financials:

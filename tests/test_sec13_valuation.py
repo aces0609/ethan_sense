@@ -238,4 +238,6 @@ def test_valuation_without_adapter_renders_xbrl_rows(edgar_mock, output_dir):
     ltm_block = next(b for b in table_blocks(md) if "EBITDA" in b)
     assert "n/a (no quote)" in ltm_block and "EV/EBITDA (LTM)" in ltm_block
     assert all(store.get(s).tier == 1 for c in draft["claims"] for s in c["source_ids"])
-    assert draft["budget"]["searches"] == "0/2"
+    from primer.config import section_budget
+
+    assert draft["budget"]["searches"] == f"0/{int(section_budget(13)['searches'])}"

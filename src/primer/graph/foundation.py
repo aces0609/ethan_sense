@@ -221,8 +221,10 @@ def build_foundation(state: PrimerState) -> dict[str, Any]:
         "gov_revenue": {},
         "peers": [],
     }
+    if ent.private:
+        return {"foundation": _private_foundation(inputs, ent, store, as_of, found, runlog)}
     if not ent.cik:
-        found["note"] = "not an SEC filer; foundation pack empty (private path)"
+        found["note"] = "not an SEC filer; foundation pack empty"
         runlog.meta["foundation"] = {"note": found["note"]}
         return {"foundation": found}
 
@@ -244,6 +246,42 @@ def build_foundation(state: PrimerState) -> dict[str, Any]:
     }
     runlog.write()
     return {"foundation": found}
+
+
+def _private_foundation(inputs, ent, store, as_of, found, runlog) -> dict[str, Any]:
+    """Foundation pack of a company with no SEC filings (PLAN 3.4): no 10-K, 10-Q or proxy and
+    no SEC filing call except the Form D search. Private-placement filings go under the
+    `private` key, the company site map under `ir`, press pages under `sources`."""
+    from primer.sections.private import build_private_foundation
+
+    found["note"] = "private company: no 10-K, 10-Q or proxy; Form D, company site and press only"
+    with runlog.timed("foundation_pack"):
+        try:
+            build_private_foundation(inputs, ent, store, as_of, found, runlog, _classify_links)
+        except Exception as e:  # noqa: BLE001 - a failed discovery is a coverage note
+            runlog.error(f"private foundation: {e!r}"[:300])
+            found.setdefault("private", {"notes": []})["notes"].append(
+                f"private foundation pack incomplete: {e!r}"[:200]
+            )
+    priv = found.get("private") or {}
+    fd = priv.get("form_d") or {}
+    runlog.meta["foundation"] = {
+        "note": found["note"],
+        "private": {
+            "form_d": {
+                "source": fd.get("source"),
+                "filings": len(fd.get("filings") or []),
+                "failures": fd.get("failures", 0),
+                "queries": fd.get("queries", []),
+            },
+            "site": priv.get("site"),
+            "press_hits": len(priv.get("press") or []),
+            "notes": priv.get("notes", []),
+        },
+        "sources": {k: len(v) for k, v in found["sources"].items()},
+    }
+    runlog.write()
+    return found
 
 
 def _filings(edgar, store, ent, as_of, found, runlog) -> None:

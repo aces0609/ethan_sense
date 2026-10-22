@@ -49,6 +49,12 @@ class Inputs(BaseModel):
     sections: list[int] = Field(default_factory=lambda: list(range(1, 15)))
     debug: bool = False
     offline: bool = False
+    private: bool = (
+        False  # treat the company as private even if an SEC match exists (§4 private path)
+    )
+    replay: bool = False  # exact offline replay of an earlier run (record/replay layer)
+    replay_of: str | None = None  # run directory the replay reads its recording from
+    cik: str | None = None  # pre-resolved CIK (answer to the ambiguity prompt)
 
 
 class Entity(BaseModel):
@@ -63,6 +69,9 @@ class Entity(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     uei_set: list[str] = Field(default_factory=list)
     state_of_incorporation: str | None = None
+    # private path (PLAN 3.4): no SEC registrant, or `--private` forced. Drives the degraded
+    # sections 4, 8-11 and 13 and the frontmatter source_limits entry.
+    private: bool = False
 
 
 class FilingRef(BaseModel):

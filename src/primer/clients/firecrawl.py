@@ -23,6 +23,7 @@ import json
 import os
 import threading
 import time
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 from urllib.parse import urlparse
@@ -31,6 +32,7 @@ import httpx
 
 from primer.clients.cache import CacheMiss, DiskCache
 from primer.clients.ratelimit import TokenBucket
+from primer.clients.robots import record_policy, robots_allowed
 from primer.config import budgets_config, domain_policy, output_root, tier_for_url
 from primer.evidence.store import (
     EvidenceStore,
@@ -49,6 +51,60 @@ _RPM = int(os.environ.get("FIRECRAWL_RPM", "30"))
 _BUCKET = TokenBucket(rate_per_sec=_RPM / 60.0, capacity=3)
 
 CREDITS = {"search_per_10": 2, "scrape": 1, "scrape_json": 5, "map": 1, "parse_per_page": 1}
+
+# page metadata that survives for an access=limited source: the headline, the publisher and
+# the dates, never the page description or any body text
+_LIMITED_META_KEYS = (
+    "title",
+    "ogTitle",
+    "ogSiteName",
+    "statusCode",
+    "sourceURL",
+    "publishedTime",
+    "article:published_time",
+    "datePublished",
+    "modifiedTime",
+)
+
+
+def _scrub_limited(resp: dict[str, Any]) -> dict[str, Any]:
+    """A /scrape response reduced to what an access=limited source may keep on disk."""
+    data = resp.get("data")
+    if not isinstance(data, dict):
+        return resp
+    meta = data.get("metadata") or {}
+    kept = {k: meta[k] for k in _LIMITED_META_KEYS if k in meta}
+    title = str(kept.get("title") or kept.get("ogTitle") or "").strip()
+    return {
+        **{k: v for k, v in resp.items() if k != "data"},
+        "data": {"markdown": f"# {title}\n" if title else "", "metadata": kept},
+    }
+
+
+def _scrub_search(resp: dict[str, Any]) -> dict[str, Any]:
+    """A /search response with the excerpts and page bodies of access=limited hits removed."""
+    data = resp.get("data")
+    hits = data.get("web") if isinstance(data, dict) else data
+    if not isinstance(hits, list) or not any(
+        isinstance(h, dict) and h.get("url") and domain_policy(h["url"]) == "limited" for h in hits
+    ):
+        return resp
+
+    def clean(h: Any) -> Any:
+        if not (isinstance(h, dict) and h.get("url") and domain_policy(h["url"]) == "limited"):
+            return h
+        meta = h.get("metadata") or {}
+        out = {k: v for k, v in h.items() if k not in ("markdown", "description", "metadata")}
+        out["metadata"] = {k: meta[k] for k in _LIMITED_META_KEYS if k in meta}
+        if h.get("markdown"):
+            # keep the hit registrable (headline only) so a cached search behaves like a fresh one
+            out["markdown"] = f"# {h.get('title') or meta.get('title') or ''}\n"
+        return out
+
+    cleaned = [clean(h) for h in hits]
+    if isinstance(data, dict):
+        return {**resp, "data": {**data, "web": cleaned}}
+    return {**resp, "data": cleaned}
 
 
 class FirecrawlError(RuntimeError):
@@ -103,9 +159,15 @@ class FirecrawlClient:
                 raise BudgetExhausted(f"primer credit cap {self.run_cap} reached ({used} used)")
 
     def _post(
-        self, path: str, body: dict[str, Any], retries: int = 5, cacheable: bool = True
+        self,
+        path: str,
+        body: dict[str, Any],
+        retries: int = 5,
+        cacheable: bool = True,
+        scrub: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], bool]:
-        """Return (response json, cached)."""
+        """Return (response json, cached). `scrub` rewrites the response before it is written
+        to the disk cache (access=limited pages keep their headline there, never the body)."""
         key = f"POST {path} {json.dumps(body, sort_keys=True)}"
         if self.cache and cacheable:
             try:
@@ -149,7 +211,7 @@ class FirecrawlClient:
                 raise FirecrawlError(f"{path} -> {r.status_code}: {r.text[:300]}")
             data = r.json()
             if self.cache and cacheable and data.get("success", True):
-                self.cache.put(key, data)
+                self.cache.put(key, scrub(data) if scrub else data)
             return data, False
         raise FirecrawlError(f"{path}: rate limited after {retries} attempts")
 
@@ -178,6 +240,29 @@ class FirecrawlClient:
             self.credits_used += n
         if self.runlog:
             self.runlog.count("firecrawl_credits", n)
+
+    # ---- domain policy (requirements §8 Paywalls and terms) -------------------------------
+
+    def _robots_block(self, url: str) -> str | None:
+        """None when `url` may be fetched; else the reason it may not. A block is counted as
+        `firecrawl_robots_blocked` and listed in run.json meta.blocked; it is not an error."""
+        ok, reason = robots_allowed(url, runlog=self.runlog, offline=self.offline)
+        if ok:
+            return None
+        if self.runlog:
+            self.runlog.count("firecrawl_robots_blocked")
+        record_policy(self.runlog, url, "robots_blocked", reason)
+        return reason
+
+    def _filter_urls(self, urls: list[str]) -> list[str]:
+        """Drop denied and robots-disallowed URLs before they are handed to Firecrawl."""
+        keep = []
+        for u in urls:
+            if domain_policy(u) == "deny":
+                record_policy(self.runlog, u, "denied")
+            elif self._robots_block(u) is None:
+                keep.append(u)
+        return keep
 
     # ---- registration helpers --------------------------------------------------------
 
@@ -256,7 +341,7 @@ class FirecrawlClient:
         self._check_caps(est)
         if self.runlog:
             self.runlog.query("firecrawl_search", query, limit=limit, scrape=scrape)
-        resp, cached = self._post("/search", body)
+        resp, cached = self._post("/search", body, scrub=_scrub_search)
         data = resp.get("data", {})
         hits = data.get("web", data) if isinstance(data, dict) else data
         hits = hits or []
@@ -268,12 +353,22 @@ class FirecrawlClient:
         out = []
         for h in hits:
             url = h.get("url")
-            if not url or domain_policy(url) == "deny":
+            if not url:
                 continue
+            policy = domain_policy(url)
+            if policy == "deny":
+                record_policy(self.runlog, url, "denied")
+                continue
+            if scrape and h.get("markdown") and self._robots_block(url):
+                # the page body came back with the search; a disallowed page is neither
+                # registered nor surfaced (the block is counted and listed in run.json)
+                continue
+            record_policy(self.runlog, url, "limited" if policy == "limited" else "allowed")
             row = {
                 "url": url,
                 "title": h.get("title"),
-                "description": (h.get("description") or "")[:500],
+                # a search excerpt of a paywalled page is body text: headline and URL only
+                "description": "" if policy == "limited" else (h.get("description") or "")[:500],
                 "domain": urlparse(url).netloc.lower(),
             }
             if scrape and h.get("markdown"):
@@ -297,8 +392,21 @@ class FirecrawlClient:
         published_date: date | None = None,
     ) -> dict[str, Any]:
         """Scrape one URL to markdown (and optional schema-typed JSON); registers it."""
-        if domain_policy(url) == "deny":
+        policy = domain_policy(url)
+        if policy == "deny":
+            record_policy(self.runlog, url, "denied")
             raise FirecrawlError(f"denied by domain policy: {url}")
+        blocked = self._robots_block(url)
+        if blocked:
+            # not fetched and not an error: the caller sees no source and carries on
+            return {
+                "source_id": None,
+                "markdown": "",
+                "json": None,
+                "metadata": {},
+                "cached": False,
+                "blocked": blocked,
+            }
         formats: list[Any] = ["markdown"]
         if json_schema:
             fmt: dict[str, Any] = {"type": "json", "schema": json_schema}
@@ -312,7 +420,9 @@ class FirecrawlClient:
         self._check_caps(est)
         if self.runlog:
             self.runlog.query("firecrawl_scrape", url, json=bool(json_schema), pdf=pdf)
-        resp, cached = self._post("/scrape", body)
+        resp, cached = self._post(
+            "/scrape", body, scrub=_scrub_limited if policy == "limited" else None
+        )
         self._spend(est, resp, cached)
         data = resp.get("data", {})
         rec = self._register_page(
@@ -323,6 +433,19 @@ class FirecrawlClient:
             section_hint,
             published_date=published_date,
         )
+        record_policy(self.runlog, url, "limited" if policy == "limited" else "allowed")
+        if policy == "limited":
+            # fetched for the headline only: the body never leaves this method, so no caller
+            # can pass paywalled text to a drafter (the store holds the stub, see _register_page)
+            meta = data.get("metadata", {}) or {}
+            return {
+                "source_id": rec.source_id if rec else None,
+                "markdown": "",
+                "json": None,
+                "metadata": {k: meta[k] for k in _LIMITED_META_KEYS if k in meta},
+                "cached": cached,
+                "access": "limited",
+            }
         return {
             "source_id": rec.source_id if rec else None,
             "markdown": data.get("markdown", ""),
@@ -364,6 +487,9 @@ class FirecrawlClient:
         """Structured extraction without fixed URLs (replacement for /extract). Polls to completion."""
         body: dict[str, Any] = {"prompt": prompt, "schema": schema}
         if urls:
+            urls = self._filter_urls(urls)
+            if not urls:
+                return {}  # every URL was denied or robots-disallowed: nothing to extract from
             body["urls"] = urls
         self._check_caps(estimate_credits)
         if self.runlog:

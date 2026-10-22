@@ -12,8 +12,8 @@
 # sections now get roughly double their room (searches 4→8 / 3→6, scrapes 6→12, credits
 # 20→40 / 16→32). Section 4 and the foundation budget are unchanged. Arithmetic for a
 # 13-section run (sections 2–14), credits:
-#   sections 2..14 = 12+40+40+40+40+16+16+5+14+16+40+12+32 = 323 (was 227)
-#   + foundation 30 + market_data 40 = 393 < 420 per-primer cap (27 spare)
+#   sections 2..14 = 12+40+40+40+40+16+16+14+14+16+40+16+32 = 336 (was 227)
+#   + foundation 30 + market_data 40 = 406 < 420 per-primer cap (14 spare; sections 9 and 13 are raised for the private path and spend little on public companies)
 # A section's expected spend is below its cap: 8 searches × 2 + 12 scrapes × 1 = 28 of 40,
 # the rest is headroom for PDF parses (1 per page) and the occasional JSON-schema scrape.
 defaults:
@@ -48,11 +48,11 @@ sections:
   6:  {pages: 2.0, searches: 6, scrapes: 12, credits: 40}   # was 3 / 6 / 20
   7:  {pages: 1.0, searches: 3, scrapes: 5, credits: 16}
   8:  {pages: 1.0, searches: 3, scrapes: 5, credits: 16}
-  9:  {pages: 1.5, searches: 1, scrapes: 2, credits: 5}
+  9:  {pages: 1.5, searches: 3, scrapes: 4, credits: 14}   # public: XBRL only (spends ~0); private: press figures need the room
   10: {pages: 2.0, searches: 3, scrapes: 4, credits: 14}
   11: {pages: 1.5, searches: 3, scrapes: 5, credits: 16}
   12: {pages: 2.5, searches: 8, scrapes: 12, credits: 40}   # was 4 / 6 / 20; pages 2.5: the AlphaSense thesis sections run ~4 pages (2026-10-22)
-  13: {pages: 1.5, searches: 2, scrapes: 4, credits: 12}
+  13: {pages: 1.5, searches: 3, scrapes: 5, credits: 16}   # private path: funding rounds and valuation
   14: {pages: 1.0, searches: 6, scrapes: 12, credits: 32}   # was 3 / 6 / 16
 
 # Numeric-consistency tolerance by metric family (fraction of the larger value).

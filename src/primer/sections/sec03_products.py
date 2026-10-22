@@ -14,7 +14,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from primer.sections import common
+from primer.config import peer_fallbacks
+from primer.sections import common, private
 from primer.sections import text_tools as tt
 from primer.sections.common import ToolContext
 from primer.sections.exhibits_sec02 import dropped_note, find_segment_table
@@ -98,6 +99,10 @@ def draft(
     ctx: ToolContext,
     critic_notes: list[str] | None = None,
 ) -> SectionDraft:
+    if private.is_private(ctx.entity):
+        return private.draft_web_only(
+            brief, ctx, tool_results, missing="10-K", critic_notes=critic_notes
+        )
     item1, k_sid = ctx.item_text("1")
     if not item1 or not k_sid:
         return common.unavailable_draft(brief, "no 10-K Item 1 in the foundation pack", ctx)
@@ -205,7 +210,7 @@ def _lead_sentences(
     elif peers:
         out.append(f"The 10-K names {', '.join(peers)} as competitors{cite}")
     # competitor comparison from scraped pages (only when the page text names a peer)
-    peer_keys = [p.split()[0] for p in peers if p] + ["Boeing", "RTX", "Northrop", "Airbus", "BAE"]
+    peer_keys = [p.split()[0] for p in peers if p] + peer_fallbacks(ctx.entity.sector_tag)
     for w in web:
         sid = w["source_id"]
         if not ctx.store.has(sid):

@@ -29,6 +29,14 @@ limited:
   - reuters.com
   - nytimes.com
 
+# robots.txt (requirements §8): fetched once per host per day and cached under output/.cache/robots.
+# Tier-1 hosts above are never checked (we call their APIs). A disallowed URL is not fetched, is
+# counted as firecrawl_robots_blocked and listed in run.json meta.blocked; it never fails a section.
+robots:
+  respect: true
+  user_agent_token: "ethan_sense"   # the token matched against User-agent lines
+  skip_hosts: []                    # extra hosts to skip, besides tier1_hosts
+
 # Free market-data pages (v1 substitute for a market-data API). Yahoo is accepted with its
 # terms-of-use exposure stated in the frontmatter source_limits.
 market_data:
@@ -70,9 +78,94 @@ trade_press:
     - aviationweek.com
     - flightglobal.com
     - airandspaceforces.com
+  technology:
+    - theverge.com
+    - arstechnica.com
+    - techcrunch.com
+    - 9to5mac.com
+    - tomshardware.com
+    - semiengineering.com
+  pharma_biotech:
+    - fiercepharma.com
+    - fiercebiotech.com
+    - statnews.com
+    - endpts.com
+    - biopharmadive.com
+  industrial:
+    - industryweek.com
+    - constructiondive.com
+    - supplychaindive.com
+  default: []
+
+# SIC code (4 digits) -> sector tag, first match wins. Ranges are inclusive "lo-hi" strings.
+# Extending coverage to a new sector is a config change: add the tag here and its trade press above.
+sectors:
+  aerospace_defense: ["3720-3729", "3760-3769", "3812-3812", "3480-3489", "3795-3795"]
+  technology: ["3570-3579", "3660-3679", "3674-3674", "7370-7379", "3571-3571"]
+  pharma_biotech: ["2830-2836", "8731-8731"]
+  industrial: ["3510-3569", "3580-3599", "3710-3719"]
+
+# Sector-specific research prompts layered onto the generic section briefs, keyed
+# sector tag -> section number. `web_queries` are appended to the section's template queries
+# ({co}, {fy} placeholders) and `sub_questions` to its sub-questions. A company whose sector
+# tag has no entry gets the generic brief only. Adding a sector is a config change.
+sector_briefs:
+  aerospace_defense:
+    3:
+      web_queries:
+        - "{co} sixth-generation fighter"
+        - "{co} NGAD OR F-47 OR F/A-XX"
+        - "{co} shadow factory OR production line OR rate break"
+      sub_questions:
+        - "Which next-generation platform awards or sixth-generation programs has the company won, lost or bid on, and when?"
+        - "What production-system or factory changes (new lines, shadow factories, rate breaks) are dated in company releases or trade press?"
+    14:
+      web_queries:
+        - "{co} contract conversion OR definitization OR multiyear award {fy}"
+      sub_questions:
+        - "Which contracts were converted, definitized or awarded as multiyear in the window, and for what value?"
+  pharma_biotech:
+    3:
+      web_queries:
+        - "{co} pipeline phase 3"
+        - "{co} FDA approval {fy}"
+      sub_questions:
+        - "Which pipeline candidates are in Phase 3 or under regulatory review, and which readouts or decisions are dated in the window?"
+    14:
+      web_queries:
+        - "{co} FDA approval OR clinical trial results OR patent expiry {fy}"
+      sub_questions:
+        - "Which regulatory decisions, trial readouts or loss-of-exclusivity events fall inside the window, and on what date?"
+  technology:
+    3:
+      web_queries:
+        - "{co} installed base OR active devices OR subscribers"
+      sub_questions:
+        - "What installed-base, subscriber or active-device counts does the company report, and as of when?"
+
+# Competitor names looked for in scraped pages when comparing the company with its peers
+# (section 3), in addition to the competitors the 10-K names. Single words, matched whole-word.
+peer_fallbacks:
+  aerospace_defense: [Boeing, RTX, Northrop, Airbus, BAE]
+  technology: [Microsoft, Samsung, Google, Alphabet, Amazon, Dell, Huawei]
+  pharma_biotech: [Merck, "Johnson & Johnson", AbbVie, Lilly, Novartis, AstraZeneca, GSK, Roche, Sanofi]
+  industrial: [Caterpillar, Deere, Honeywell, Siemens, Emerson]
   default: []
 
 # Frontmatter source_limits that every v1 primer carries (requirements §2).
 source_limits:
   - "No sell-side research or expert-call transcripts were available; broker views are second-hand from news and rating aggregators"
   - "Market data scraped from public aggregator pages, not a licensed feed"
+
+# Private-company path (PLAN 3.4). The extra frontmatter source_limits entry carried only by
+# runs where resolve_entity chose the private path (no SEC registrant, or --private), and the
+# web queries sections 9, 10, 11 and 13 run in place of XBRL, filings and market data. The
+# queries stay inside each section's budgets.yaml caps.
+private_source_limit: "Private company: no SEC financial statements; financial figures are press-reported and unaudited"
+private_path:
+  form_d_years: 5          # EDGAR full-text window for private-placement (Form D) filings
+  queries:
+    9:  ["{co} annual revenue", "{co} revenue profit growth"]
+    10: ["{co} backlog contracts customers", "{co} revenue growth employees"]
+    11: ["{co} funding round valuation", "{co} debt financing credit facility", "{co} tender offer valuation"]
+    13: ["{co} funding round valuation", "{co} tender offer valuation"]

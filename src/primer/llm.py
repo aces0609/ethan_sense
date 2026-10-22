@@ -5,12 +5,22 @@ config/models.yaml, or None when the role resolves to "template" (no provider ke
 Callers must handle None by using their deterministic template path. Token usage is
 recorded per role in the RunLog. The endpoint comes from the active provider's
 base_url_env (OPENAI_BASE_URL / ANTHROPIC_BASE_URL) so a proxy is a .env change.
+
+Record / replay (requirements §8 Reproducibility): while a run is being recorded
+(`primer.clients.cache.activate(run_dir, "record")`) every call's outcome is written to
+`run_dir/replay/llm/{sha256(role + system + user + schema name)}.json` as `{text}`, the parsed
+model's `model_dump()`, or `{none: true}` for a call that returned None (template path, token
+cap, provider error). In replay mode the recorded outcome is returned without touching a
+provider: no tokens are spent, a call with no recording returns None (the template path) and
+is counted as `replay_llm_misses`.
 """
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
+from primer.clients import cache as _rec
 from primer.config import budgets_config, provider_base_url, role_model
 from primer.runlog import RunLog
 
@@ -105,9 +115,43 @@ def _record_usage(resp: Any, role: str, runlog: RunLog | None) -> None:
         )
 
 
+def llm_key(role: str, system: str, user: str, schema_name: str = "") -> str:
+    """Recording key: sha256 over role, system prompt, user prompt and schema name."""
+    h = hashlib.sha256()
+    for part in (role, system, user, schema_name):
+        h.update(part.encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
+def _replayed(
+    role: str, key: str, runlog: RunLog | None, hint: str = ""
+) -> tuple[bool, dict[str, Any]]:
+    """(found, record) for a replay lookup; a missing entry is counted and returns (False, {})."""
+    rec = _rec.replay_json("llm", key)
+    if rec is None:
+        _rec.count_llm_miss(f"{role} {key[:12]} {hint[:100]!r}")
+        return False, {}
+    if runlog:
+        runlog.count("replay_llm_hits")
+    return True, rec
+
+
 def invoke_text(role: str, system: str, user: str, runlog: RunLog | None = None) -> str | None:
     """One-shot text completion for a role. Returns None when no LLM is configured or the
     per-primer token cap is spent."""
+    key = llm_key(role, system, user)
+    if _rec.mode() == "replay":
+        found, rec = _replayed(role, key, runlog, user)
+        return rec.get("text") if found and not rec.get("none") else None
+    text = _invoke_text(role, system, user, runlog)
+    payload: dict[str, Any] = {"role": role, "kind": "text"}
+    payload.update({"text": text} if text is not None else {"none": True})
+    _rec.record_json("llm", key, payload)
+    return text
+
+
+def _invoke_text(role: str, system: str, user: str, runlog: RunLog | None) -> str | None:
     if not budget_allows(role, runlog):
         return None
     llm = chat(role)
@@ -136,6 +180,34 @@ def invoke_text(role: str, system: str, user: str, runlog: RunLog | None = None)
 def invoke_structured(
     role: str, schema: type, system: str, user: str, runlog: RunLog | None = None
 ):
+    key = llm_key(role, system, user, getattr(schema, "__name__", str(schema)))
+    if _rec.mode() == "replay":
+        found, rec = _replayed(role, key, runlog, user)
+        if not found or rec.get("none"):
+            return None
+        try:
+            value = rec["value"]
+            return schema.model_validate(value) if hasattr(schema, "model_validate") else value
+        except Exception:  # noqa: BLE001 - a recording the schema no longer accepts is a miss
+            _rec.count_llm_miss(f"{role} {key[:16]} (schema mismatch)")
+            return None
+    parsed = _invoke_structured(role, schema, system, user, runlog)
+    payload: dict[str, Any] = {
+        "role": role,
+        "kind": "structured",
+        "schema": getattr(schema, "__name__", ""),
+    }
+    if parsed is None:
+        payload["none"] = True
+    else:
+        payload["value"] = (
+            parsed.model_dump(mode="json") if hasattr(parsed, "model_dump") else parsed
+        )
+    _rec.record_json("llm", key, payload)
+    return parsed
+
+
+def _invoke_structured(role: str, schema: type, system: str, user: str, runlog: RunLog | None):
     if not budget_allows(role, runlog):
         return None
     llm = chat(role)

@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from primer.sections import common
+from primer.sections import common, private
 from primer.sections import text_tools as tt
 from primer.sections.common import ToolContext
 from primer.sections.exhibits_sec02 import dropped_note, segment_revenue_exhibit, strip_item_heading
@@ -145,6 +145,10 @@ def draft(
     ctx: ToolContext,
     critic_notes: list[str] | None = None,
 ) -> SectionDraft:
+    if private.is_private(ctx.entity):
+        return private.draft_web_only(
+            brief, ctx, tool_results, missing="10-K", critic_notes=critic_notes
+        )
     tenk = ctx.foundation_sources("10-K")
     if not tenk:
         return common.unavailable_draft(brief, "no 10-K in the foundation pack", ctx)
