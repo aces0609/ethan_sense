@@ -4,25 +4,25 @@ Oct 21, 2026 · Ethan
 
 ## 1. Purpose and scope
 
-The agent takes a company name (plus ticker, if public) and returns a 14-section company primer as a single `.mdx` file, with every factual claim cited to a fetched source. The target quality bar is the AlphaSense Company Primer (three examples reviewed: SpaceX, Lockheed Martin, Boeing, all dated Oct 21, 2026), rebuilt on public and licensable sources instead of AlphaSense's proprietary broker-research and expert-call corpus.
+The agent takes a company name (plus ticker, if public) and returns a 14-section company primer as a single `.md` file, with every factual claim cited to a fetched source. The target quality bar is the AlphaSense Company Primer (three examples reviewed: SpaceX, Lockheed Martin, Boeing, all dated Oct 21, 2026), rebuilt on public and licensable sources instead of AlphaSense's proprietary broker-research and expert-call corpus.
 
 ### In scope for v1
 
 - US-listed public companies with SEC filings (the easy case: XBRL financials, 10-K/10-Q/8-K, proxies, earnings releases all free).
 - Private and foreign companies on a degraded path: web research plus whatever structured data exists, with the Historical Financials, Capital Structure and Valuation sections explicitly marked as thin.
 - Orchestration in LangGraph (Python), web retrieval via Firecrawl, structured financials via SEC EDGAR and US-government open-data APIs. v1 uses no paid data subscription; every place a paid service would do better is called out in the doc with the recommended service.
-- Output: one `.mdx` file plus a machine-readable sources manifest (JSON) and a run log.
+- Output: one `.md` file plus a machine-readable sources manifest (JSON) and a run log.
 
 ### Out of scope for v1
 
 - The AlphaSense 14th section ("Internal Relationship Context" from CRM, Slack, email). Design the graph so it can be added as another section subgraph later.
 - Proprietary sell-side research and expert-call transcripts. The agent reports what public coverage says about broker views and labels the gap; it does not pretend to have the notes.
 - Interactive chat, follow-up questions, or portfolio-level runs. One company per invocation.
-- A rendering site for the MDX. The file must compile under a standard MDX toolchain, but the site is a separate decision (see Open questions).
+- A rendering site for the markdown file; the site is a separate decision (see Open questions).
 
-**Primary user:** an analyst or operator who wants a first-pass primer in under 30 minutes of wall-clock time and will read it critically, follow the citations, and edit. The primer is a research accelerator, not a published opinion, and the MDX should carry that disclaimer in its frontmatter.
+**Primary user:** an analyst or operator who wants a first-pass primer in under 30 minutes of wall-clock time and will read it critically, follow the citations, and edit. The primer is a research accelerator, not a published opinion, and the primer should carry that disclaimer in its frontmatter.
 
-## 2. Inputs, outputs, and the MDX contract
+## 2. Inputs, outputs, and the markdown contract
 
 ### Inputs (CLI args or a JSON request)
 
@@ -40,7 +40,7 @@ There is one search budget per section (standard); a deep mode is deferred until
 
 | File | Contents |
 |---|---|
-| `primer.mdx` | The primer, frontmatter + 14 H2 sections + Sources appendix |
+| `primer.md` | The primer, frontmatter + 14 H2 sections + Sources appendix |
 | `sources.json` | Every cited source: id, type, publisher, title, URL, fetch timestamp, content hash, which sections cite it |
 | `evidence/` | Raw fetched markdown per source (Firecrawl output) so citations are reproducible |
 | `run.json` | Graph trace summary: queries issued, credits spent, tokens, per-section timings, coverage flags |
@@ -68,11 +68,11 @@ Page budget is what the AlphaSense research plan uses; "Research" says whether t
 
 Section 4 is emitted for any company whose filings disclose US government revenue (the 10-K segment or concentration note says so); for a company with none it is emitted as a one-line coverage blockquote, so the numbering is stable across primers.
 
-### MDX contract (so the file is useful without a custom renderer)
+### Markdown contract (so the file is useful without a custom renderer)
 
-- Keep it simple: the file is plain GitHub-flavored markdown with a YAML frontmatter block and the `.mdx` extension. No import lines, no JSX, no custom components in v1, so it renders anywhere markdown renders and still compiles as MDX.
+- Keep it simple: the file is plain GitHub-flavored markdown with a YAML frontmatter block and the `.md` extension. No import lines, no JSX, no custom components in v1, so it renders anywhere markdown renders.
 - YAML frontmatter: `company`, `ticker`, `cik`, `exchange`, `is_public`, `as_of`, `run_id`, `generator_version`, `coverage` (per-section `full | partial | unavailable | not_applicable`), `source_limits` (a list; v1 always includes "No sell-side research or expert-call transcripts were available; broker views are second-hand from news and rating aggregators" and "Market data scraped from public aggregator pages, not a licensed feed"), `disclaimer`.
-- One `##` per section, numbered as above, in order. No heading-id syntax (`{#sec-9}` is MDX-renderer-specific); cross-references are by section number in the text.
+- One `##` per section, numbered as above, in order. No heading-id syntax (`{#sec-9}` is renderer-specific); cross-references are by section number in the text.
 - Citations as footnote markers `[^12]` inline and a `## Sources` appendix that mirrors `sources.json` in the AlphaSense citation style: `[12] 10-Q • Lockheed Martin Corp • 23 Jul 26 • "Quarterly Report Q2 2026" • <url>`.
 - Each section opens with an upfront caveat line when applicable (the examples all do this: listing status, ownership concentration, data gaps).
 - Coverage and conflict notes are blockquotes, not components: `> Coverage: partial — no earnings-call transcript was found for Q2.` and `> Conflict: 737 build rate reported as 42/month [^8] and 47/month [^11]; sources differ.`
@@ -170,7 +170,7 @@ Sections 10 and 13 need prices, consensus estimates, price targets and ratings. 
 | Stooq daily CSV (`stooq.com/q/d/l/?s={tk}.us`) or Yahoo chart endpoint | Price history for the as-of date and 52-week range | Direct GET or /scrape | Keep a fallback; use the 10-K share count from XBRL, not the page's, for EV |
 | Company IR "Analyst coverage" page | The list of covering firms and analysts, which bounds who may be attributed in section 12 | /scrape | Not every company publishes one |
 
-Derived multiples (EV, EV/EBITDA, P/FCF) are computed in-agent from XBRL (shares, debt, cash, EBITDA components) and the price above, and the MDX labels them derived with the formula in the Sources appendix, so a reviewer can see that no aggregator's definition was silently adopted.
+Derived multiples (EV, EV/EBITDA, P/FCF) are computed in-agent from XBRL (shares, debt, cash, EBITDA components) and the price above, and the primer labels them derived with the formula in the Sources appendix, so a reviewer can see that no aggregator's definition was silently adopted.
 
 ### Paid upgrade path — recommended, not in v1
 
@@ -191,7 +191,7 @@ Each row is a gap the free sources only partly close. The left columns describe 
 
 ## 5. Architecture
 
-Research is parallel per section and writing is serial, which is the pattern LangChain settled on for Open Deep Research after finding that sub-agents writing sections in parallel produced incoherent reports. Here the 13 researched sections map one-to-one onto researcher subgraphs fanned out with LangGraph's `Send`, each returning compressed, cited findings; a final stage writes Key Takeaways from those findings and assembles the MDX.
+Research is parallel per section and writing is serial, which is the pattern LangChain settled on for Open Deep Research after finding that sub-agents writing sections in parallel produced incoherent reports. Here the 13 researched sections map one-to-one onto researcher subgraphs fanned out with LangGraph's `Send`, each returning compressed, cited findings; a final stage writes Key Takeaways from those findings and assembles the primer.
 
 The top row runs once per company, the middle box runs once per section in parallel, and the bottom row runs once per primer; a validation failure sends one section back through the middle box, not the whole run.
 
@@ -205,7 +205,7 @@ The top row runs once per company, the middle box runs once per section in paral
 6. **section_researcher** (subgraph, below).
 7. **key_takeaways** — synthesizes up to 7 bullets from the 13 section drafts; no tool calls, matching the example plan.
 8. **assemble** — renders frontmatter, sections in order, footnotes, and the Sources appendix; writes `sources.json`.
-9. **validate** — citation integrity (every `[^n]` resolves to a fetched source; every source is cited), MDX compiles, numeric-consistency pass (same metric quoted in two sections must match or be flagged), coverage flags set. Failures route back to the offending section with the critic's notes, bounded to two retries.
+9. **validate** — citation integrity (every `[^n]` resolves to a fetched source; every source is cited), frontmatter parses, numeric-consistency pass (same metric quoted in two sections must match or be flagged), coverage flags set. Failures route back to the offending section with the critic's notes, bounded to two retries.
 10. **review** — in `debug: true` runs only, an interrupt with the checkpointer so a human can approve or annotate before export; otherwise a pass-through.
 11. **export** — write files; emit run summary.
 
@@ -264,8 +264,8 @@ The single hard rule: **the model never writes a citation it did not fetch.** Ev
 
 ### Validation gate (validate node, all must pass or the run is marked `needs_review`)
 
-1. Every `[^n]` in the MDX resolves to a source record; every source record in the appendix is cited at least once.
-2. The MDX compiles with `@mdx-js/mdx` (run via a Node sidecar or mdx-py); no raw JSX in prose; frontmatter parses.
+1. Every `[^n]` in the primer resolves to a source record; every source record in the appendix is cited at least once.
+2. No raw JSX in prose; frontmatter parses.
 3. Numeric consistency: the claims list is grouped by (metric, period); any group with two values that differ by more than a tolerance is flagged in a conflict blockquote inside the later section, not silently reconciled. The examples show why: 42 vs 47 aircraft per month, 1.2x vs 2.0x leverage.
 4. Tier rule: a financial statement number cited only to a tier-2 news page when companyfacts has the concept is flagged.
 5. Attribution rule: any sentence of the form "Firm notes/argues/estimates…" must cite a source whose text names that firm. This is the most important guard because the examples are built on broker attributions and the public web only has them second-hand.
@@ -283,7 +283,7 @@ Section 4 is held to a stricter standard than the rest of the primer because its
 - A prime/sub role is stated only when an award record or a filing names the company in that role; otherwise the row says `role: not confirmed`.
 - Every location row cites the SAM.gov entity record that carries the CAGE (registration status and expiration date included) and, where available, the 10-K Item 2 line that names the facility; a location that appears only in a news story is listed separately as unverified.
 - Entity resolution is by UEI and CAGE, never by name: the recipient-name field on USAspending is free text and a prime's subsidiaries register separately. The resolved UEI set is written into `sources.json` so a reviewer can see what was treated as "the company".
-- Source records for these items carry the government identifier in a dedicated field (`gov_id`) so the validator can check it against the URL, and the MDX footnote prints it: `[27] USAspending • CONT_AWD_… • FY2026 • "Sentinel ICBM — EMD" • <url>`.
+- Source records for these items carry the government identifier in a dedicated field (`gov_id`) so the validator can check it against the URL, and the primer footnote prints it: `[27] USAspending • CONT_AWD_… • FY2026 • "Sentinel ICBM — EMD" • <url>`.
 
 ### Critic rubric (per section, scored 1–5, written into `run.json`)
 
@@ -306,7 +306,7 @@ The three AlphaSense primers become golden references. For Lockheed Martin and B
 | Reproducibility | A run can be replayed from `evidence/` without network | Drafter reads only from the evidence store; a `--offline` flag replays |
 | Secrets | API keys from environment or a secrets manager, never in config files or logs | `.env` locally; redact keys in `run.json` |
 | Paywalls and terms | Do not bypass paywalls or CAPTCHAs; respect robots.txt where Firecrawl exposes it | A domain allow/deny list in config; paywalled hits are cited by headline and URL only, marked `access: limited` |
-| Logging | Every tool call, query, and model call traced | LangSmith or OpenTelemetry; trace id in the MDX frontmatter |
+| Logging | Every tool call, query, and model call traced | LangSmith or OpenTelemetry; trace id in the primer frontmatter |
 | Determinism | Same inputs, same evidence → materially the same primer | Temperature 0 for drafter and critic; plan and queries logged so a diff is explainable |
 | Language | English only in v1 | Foreign filings (e.g. the Japanese interim reports the SpaceX example cites) are out of scope |
 
@@ -316,7 +316,7 @@ SAM.gov is the one tier-1 source with a hard daily quota: a personal API key all
 
 Four phases, each ending at a gate that is a measurable test rather than a feature list. No dates are set here; sizing is for the first conversation with whoever builds it.
 
-**Phase 1 — Spine.** EDGAR client (tickers, submissions, companyfacts, full-text), USAspending and SAM.gov clients (shared quota counter), Firecrawl client with the credit counter, evidence store, PrimerState, the main graph with resolve_entity, foundation_pack, and one section researcher (section 9, Historical Financials, because it is structured-first and testable). Output a valid `.mdx` with just sections 1 and 9. **Gate:** Lockheed Martin FY2022–FY2025 revenue, net income, operating cash flow and capex match the example tables to the dollar, every number cites companyfacts, and the run cost is measured.
+**Phase 1 — Spine.** EDGAR client (tickers, submissions, companyfacts, full-text), USAspending and SAM.gov clients (shared quota counter), Firecrawl client with the credit counter, evidence store, PrimerState, the main graph with resolve_entity, foundation_pack, and one section researcher (section 9, Historical Financials, because it is structured-first and testable). Output a valid `.md` with just sections 1 and 9. **Gate:** Lockheed Martin FY2022–FY2025 revenue, net income, operating cash flow and capex match the example tables to the dollar, every number cites companyfacts, and the run cost is measured.
 
 **Phase 2 — Fan-out.** plan_sections, Send fan-out, the critic loop, all 13 researcher briefs from section 6, the free quote and consensus scrapers behind the market-data adapter for sections 10 and 13, key_takeaways, the full validator. **Gate:** Boeing and Lockheed primers pass the validation gate with no `unavailable` sections; a judge-model rubric scores each section ≥ 3/5 against the AlphaSense reference; under 30 minutes wall-clock.
 
@@ -329,7 +329,7 @@ Four phases, each ending at a gate that is a measurable test rather than a featu
 | Question | Decision | Where it lands |
 |---|---|---|
 | Market data for consensus, targets, multiples | Free pages (Yahoo Finance, StockAnalysis, MarketBeat) via Firecrawl for v1; Yahoo accepted with the terms-of-use exposure stated; FMP is the first paid swap | Section 4 free market-data table and paid-upgrade table; frontmatter `source_limits` |
-| MDX rendering target | None; plain markdown with frontmatter and an `.mdx` extension, no imports or components | Section 2 MDX contract |
+| Rendering target | None; plain markdown with frontmatter and a `.md` extension, no imports or components | Section 2 markdown contract |
 | Broker research / expert calls | Not available for v1; section 12 will be thinner than the examples and the frontmatter says so | Section 1 scope; section 2 frontmatter; paid-upgrade table |
 | Search depth | One standard budget per section; deep deferred | Section 2 inputs |
 | Evidence store and checkpointer | Files in the run folder; SQLite checkpointer file; no database | Sections 5 and 8 |

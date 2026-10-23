@@ -4,7 +4,6 @@ drop-and-mark-partial behaviour, and the critic and gate wiring."""
 from __future__ import annotations
 
 from datetime import date
-from pathlib import Path
 
 from primer.evidence.store import EvidenceStore
 from primer.graph.researcher import validate_exhibits
@@ -232,11 +231,8 @@ def test_gate_flags_remaining_exhibit_problems(tmp_path):
     }
     gate = check_exhibits_gate(md)
     assert not gate["ok"] and [p["section"] for p in gate["problems"]] == [5]
-    mdx = tmp_path / "p.mdx"
-    mdx.write_text("---\ncompany: X\n---\n", encoding="utf-8")
     rep = run_all(
-        mdx_text="---\ncompany: X\n---\n\nbody",
-        mdx_path=Path(mdx),
+        md_text="---\ncompany: X\n---\n\nbody",
         sections_md=md,
         claims=[],
         coverage={5: "full", 9: "full"},

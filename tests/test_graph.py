@@ -19,16 +19,16 @@ def test_phase1_run_on_fixtures(edgar_mock, output_dir):
     result = run_primer(inputs)
     run_dir = Path(result["run_dir"])
 
-    for name in ("primer.mdx", "sources.json", "run.json", "claims.json", "checkpoint.sqlite"):
+    for name in ("primer.md", "sources.json", "run.json", "claims.json", "checkpoint.sqlite"):
         assert (run_dir / name).exists(), name
     assert (run_dir / "evidence" / "index.json").exists()
 
-    mdx = (run_dir / "primer.mdx").read_text(encoding="utf-8")
-    assert mdx.startswith("---\n")
-    assert "## 1. Key Takeaways" in mdx and "## 9. Historical Financial Performance" in mdx
-    assert "## Sources" in mdx
-    assert "| Revenue | 65,984[^" in mdx
-    assert "[src_" not in mdx
+    md = (run_dir / "primer.md").read_text(encoding="utf-8")
+    assert md.startswith("---\n")
+    assert "## 1. Key Takeaways" in md and "## 9. Historical Financial Performance" in md
+    assert "## Sources" in md
+    assert "| Revenue | 65,984[^" in md
+    assert "[src_" not in md
 
     v = result["validation"]
     assert (
@@ -37,7 +37,7 @@ def test_phase1_run_on_fixtures(edgar_mock, output_dir):
         and v["checks"]["tier"]["ok"]
     )
     assert v["checks"]["coverage"]["summary"]["Historical Financial Performance"] == "full"
-    assert v["passed"] is True or v["checks"]["mdx_compile"].get("skipped")
+    assert v["passed"] is True
 
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     assert run["counters"]["edgar_requests"] >= 3
@@ -73,7 +73,7 @@ def test_unimplemented_section_is_marked_unavailable_not_dropped(
         sections=[1, 7, 9],
     )
     result = run_primer(inputs)
-    mdx = Path(result["mdx_path"]).read_text(encoding="utf-8")
-    assert "## 7. Key Acquisition History" in mdx
-    assert "> Coverage: unavailable" in mdx
+    md = Path(result["md_path"]).read_text(encoding="utf-8")
+    assert "## 7. Key Acquisition History" in md
+    assert "> Coverage: unavailable" in md
     assert result["coverage"][7] == "unavailable"

@@ -43,7 +43,7 @@ from primer.graph.interrupts import InterruptRequired, OnInterrupt, drive  # noq
 from primer.graph.reconcile import reconcile_drafts
 from primer.graph.researcher import build_researcher
 from primer.llm import invoke_structured, invoke_text
-from primer.render.mdx import render
+from primer.render.markdown import render
 from primer.runlog import get_runlog
 from primer.sections.briefs import all_briefs
 from primer.sections.style import fmt_money
@@ -497,7 +497,7 @@ def assemble(state: PrimerState) -> dict[str, Any]:
         coverage[1] = "full" if state.get("key_takeaways", "").count("- ") else "unavailable"
     claims = list(state.get("claims", []))
     sections_md = inject_conflicts(sections_md, claims)
-    mdx, cited_by, order = render(
+    md, cited_by, order = render(
         entity=state["entity"],
         as_of=state["as_of"],
         run_id=state["run_id"],
@@ -507,8 +507,8 @@ def assemble(state: PrimerState) -> dict[str, Any]:
         store=store,
         requested=sorted(inputs.sections),
     )
-    path = Path(state["run_dir"]) / "primer.mdx"
-    path.write_text(mdx, encoding="utf-8")
+    path = Path(state["run_dir"]) / "primer.md"
+    path.write_text(md, encoding="utf-8")
     store.write_sources_json(
         cited_by,
         extra={
@@ -518,7 +518,7 @@ def assemble(state: PrimerState) -> dict[str, Any]:
             "footnote_order": order,
         },
     )
-    return {"mdx_path": str(path), "coverage": coverage}
+    return {"md_path": str(path), "coverage": coverage}
 
 
 def validate(state: PrimerState) -> dict[str, Any]:
@@ -526,14 +526,13 @@ def validate(state: PrimerState) -> dict[str, Any]:
     as_of = date.fromisoformat(state["as_of"])
     store = EvidenceStore.for_run(state["run_dir"], as_of=as_of)
     runlog = get_runlog(state["run_dir"])
-    path = Path(state["mdx_path"])
+    path = Path(state["md_path"])
     sections_md = {int(s): d["markdown"] for s, d in state.get("drafts", {}).items()}
     if 1 in inputs.sections:
         sections_md[1] = state.get("key_takeaways", "")
     sections_md = inject_conflicts(sections_md, list(state.get("claims", [])))
     report = run_all(
-        mdx_text=path.read_text(encoding="utf-8"),
-        mdx_path=path,
+        md_text=path.read_text(encoding="utf-8"),
         sections_md=sections_md,
         claims=list(state.get("claims", [])),
         coverage={int(k): v for k, v in state.get("coverage", {}).items()},
@@ -591,8 +590,8 @@ def review(state: PrimerState) -> dict[str, Any]:
 
         decision = interrupt(
             {
-                "message": "Review primer.mdx before export",
-                "mdx_path": state["mdx_path"],
+                "message": "Review primer.md before export",
+                "md_path": state["md_path"],
                 "validation": state.get("validation"),
             }
         )
@@ -704,7 +703,7 @@ def run_primer(
     return {
         "run_id": run_id,
         "run_dir": str(run_dir),
-        "mdx_path": final.get("mdx_path"),
+        "md_path": final.get("md_path"),
         "validation": final.get("validation"),
         "coverage": final.get("coverage"),
         "errors": final.get("errors"),
@@ -736,7 +735,7 @@ def resume_primer(run_dir: Path) -> dict[str, Any]:
     return {
         "run_id": run_id,
         "run_dir": str(run_dir),
-        "mdx_path": final.get("mdx_path"),
+        "md_path": final.get("md_path"),
         "validation": final.get("validation"),
         "resumed": runlog.meta.get("resumed"),
         "section_runs": {

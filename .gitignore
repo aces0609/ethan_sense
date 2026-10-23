@@ -19,9 +19,6 @@ dist/
 build/
 *.egg-info/
 
-# node sidecar
-node_modules/
-
 # editors
 .idea/
 .vscode/

@@ -2,7 +2,7 @@
 
 Derived from [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) (Company Primer Agent, Oct 21, 2026). This file turns the four phases in requirements §9 into ordered, testable work items. Section numbers below (§2, §5, …) refer to the requirements document.
 
-**Goal.** `primer run --ticker LMT` writes `output/LMT/{run_id}/primer.mdx`, `sources.json`, `evidence/` and `run.json` in under 30 minutes, with every number traceable to a fetched source and no paid data subscription.
+**Goal.** `primer run --ticker LMT` writes `output/LMT/{run_id}/primer.md`, `sources.json`, `evidence/` and `run.json` in under 30 minutes, with every number traceable to a fetched source and no paid data subscription.
 
 ---
 
@@ -16,7 +16,7 @@ Derived from [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) (Company Primer Agent,
 | HTTP | `httpx` with one shared rate limiter per host | SEC 10 req/s, SAM.gov daily quota |
 | Schemas | Pydantic v2 for state, briefs, claims, source records, tool outputs | Firecrawl `/agent` and `/scrape` take Pydantic schemas |
 | Web retrieval | `firecrawl-py` SDK wrapped in one client with a credit counter | §4 Tier 2 |
-| MDX check | Node sidecar: `node tools/mdx-check.mjs primer.mdx` using `@mdx-js/mdx` | §7 gate item 2; mdx-py is the fallback if Node is unwanted |
+| Output format | Plain GitHub-flavored markdown, `primer.md`, checked in Python (frontmatter keys, citation integrity) | §7 gate item 2; no Node toolchain |
 | Tests | `pytest`, recorded HTTP fixtures (`respx` or `vcrpy`) so unit tests never hit the network | Reproducibility; SEC fair-access |
 | Lint | `ruff` (format + lint), `mypy` on `src/primer/state.py` and adapters | Cheap, catches reducer typos in state |
 | Secrets | `.env` via `python-dotenv`; never committed; `run.json` redacts | §8 Secrets |
@@ -62,7 +62,7 @@ ethan_sense/
       exhibits.py              required-table builders (segment table, financials, program table, …)
       style.py                 house-style prompt fragments (caveat line, perspective bullets)
     render/
-      mdx.py                   frontmatter, H2s, footnotes, Sources appendix
+      markdown.py              frontmatter, H2s, footnotes, Sources appendix
       citations.py             source_id → [^n] mapping
     validate/
       citations.py             every [^n] resolves; every source cited
@@ -70,11 +70,9 @@ ethan_sense/
       attribution.py           "Firm notes…" must cite a source naming Firm
       tier.py                  statement numbers must trace to tier 1 when available
       recency.py               §14 trailing-12-month rule; §13 targets dated
-      mdx_compile.py           calls the Node sidecar
+      frontmatter.py           frontmatter keys present and parsing
     eval/
       harness.py               fact overlap, citation resolvability, judge-model rubric
-  tools/
-    mdx-check.mjs
   tests/
     fixtures/                  recorded EDGAR / USAspending / SAM.gov / Firecrawl responses
   output/                      gitignored
@@ -84,7 +82,7 @@ ethan_sense/
 
 ## 1. Phase 1 — Spine
 
-**Exit gate (from §9):** a run for Lockheed Martin produces a valid `primer.mdx` containing only sections 1 and 9; FY2022–FY2025 revenue, net income, operating cash flow and capex match the AlphaSense table to the dollar; every number cites a companyfacts source record; `run.json` reports tokens, credits and wall-clock.
+**Exit gate (from §9):** a run for Lockheed Martin produces a valid `primer.md` containing only sections 1 and 9; FY2022–FY2025 revenue, net income, operating cash flow and capex match the AlphaSense table to the dollar; every number cites a companyfacts source record; `run.json` reports tokens, credits and wall-clock.
 
 Ordered work items. Each has a test that proves it.
 
@@ -140,12 +138,12 @@ Ordered work items. Each has a test that proves it.
 - `critic`: rubric from §7, max 2 loops.
 - Test: the draft's claims list contains exactly the table values, each with a companyfacts `source_id`.
 
-### 1.9 Renderer and MDX check (`render/`, `tools/mdx-check.mjs`)
+### 1.9 Renderer and markdown check (`render/`, `validate/frontmatter.py`)
 - Frontmatter per §2 contract, including `coverage` and the two mandatory `source_limits` strings.
 - `[^n]` assignment in first-citation order; Sources appendix in the AlphaSense label style with `gov_id` printed when present.
 - Section 1 (Key Takeaways) written from section 9 alone in Phase 1, so the file has the two-section shape the gate asks for.
-- Node sidecar compiles the file with `@mdx-js/mdx`; non-zero exit fails `validate`.
-- Test: a fixture MDX with an unresolved `[^99]` fails; the LMT output compiles.
+- The gate checks the frontmatter keys and citation integrity; a failure fails `validate`.
+- Test: a fixture primer with an unresolved `[^99]` fails; the LMT output passes.
 
 ### 1.10 Run accounting (`run.json`)
 - Per-node timings, tokens by model role, Firecrawl credits, SAM.gov calls, queries issued, coverage flags, critic scores.
@@ -267,7 +265,7 @@ Ordered by risk, highest first:
 | D1 | Model provider and per-role models | 1.8 drafter, 2.2 planner | Anthropic: strong role `claude-opus-5-5` (or `claude-fable-5-1`), cheap role `claude-haiku-5-5`; configurable in `models.yaml` |
 | D2 | Per-primer token budget and per-section cap | 2.4 | Start at 400k tokens per primer, 40k per section research loop; revise after Phase 1 measurement |
 | D3 | First eval ticker for section 4: Lockheed (F-35, PAC-3, THAAD) or Northrop (Sentinel, B-21) | 2.5 | Lockheed, because Phase 1 already fixtures LMT and the golden primer exists; add NOC as the second aerospace eval |
-| D4 | MDX compile via Node sidecar or mdx-py | 1.9 | Node sidecar (`@mdx-js/mdx` is the reference implementation) |
+| D4 | MDX compile via Node sidecar or mdx-py | 1.9 | Superseded 2026-10-23: plain `.md`, no MDX compile (see DECISIONS.md) |
 | D5 | Tracing backend | 1.10 | LangSmith if a key exists, local JSONL otherwise |
 | D6 | Golden primers in the repo | 1.11 | Keep under `docs/golden/` only if licensing allows; otherwise a gitignored local path in `.env` |
 

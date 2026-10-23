@@ -264,3 +264,12 @@ evidence. Two fixes: a CEO/CFO pair whose sources are more than a year apart is 
 officer, not a conflict (`_historical_officer_pair`), and `check_recency` ignores the
 `> Conflict:` note, which cites other sections' sources by design. The SpaceX private-path
 rerun is still pending Firecrawl credits (balance 0 until the 2026-11-22 renewal).
+
+## 2026-10-23: plain `.md` output, no Node toolchain
+
+The primer is written as `primer.md` instead of `primer.mdx`. The content was already plain
+GitHub-flavored markdown (no JSX, no imports), so only the extension and the gate changed. The
+Node sidecar that compiled the file with `@mdx-js/mdx` is gone, along with the `tools/` folder,
+the CI Node steps and the `mdx_compile` gate check. The gate keeps the frontmatter and citation
+checks, and `primer md-check` replaces `primer mdx-check`. Runs made earlier keep their
+`primer.mdx`: `primer_path()` reads either name, so replay and eval-set still work on them.

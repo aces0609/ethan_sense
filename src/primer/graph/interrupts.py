@@ -6,7 +6,7 @@ Three nodes pause the graph with `langgraph.types.interrupt`:
   score}, ...]}. The answer is a CIK or a ticker (or "private" for the private path).
 - `plan_sections` (debug) -> {"message": ..., "plan": {...}}. The answer is "approve" or a
   rejection string.
-- `review` (debug) -> {"message": ..., "mdx_path": ..., "validation": {...}}. Same answers.
+- `review` (debug) -> {"message": ..., "md_path": ..., "validation": {...}}. Same answers.
 
 `drive` runs a compiled graph to completion, answering each interrupt through an
 `on_interrupt(payload) -> answer` callback. Without a callback it raises `InterruptRequired`,
@@ -57,7 +57,7 @@ def interrupt_kind(payload: Any) -> str:
             return ENTITY_CHOICE
         if "plan" in payload:
             return "plan"
-        if "mdx_path" in payload:
+        if "md_path" in payload:
             return "review"
     return "other"
 
@@ -82,7 +82,7 @@ def describe_interrupt(payload: Any, run_dir: str | None = None) -> str:
     if kind == "plan":
         return "The run is waiting for approval of the section plan (debug mode)." + where
     if kind == "review":
-        return "The run is waiting for review of primer.mdx before export (debug mode)." + where
+        return "The run is waiting for review of primer.md before export (debug mode)." + where
     msg = payload.get("message") if isinstance(payload, dict) else str(payload)
     return f"The run is paused on an interrupt: {msg}." + where
 
@@ -214,7 +214,7 @@ def make_cli_prompter(yes: bool = False, interactive: bool | None = None) -> OnI
             return typer.prompt("Reason for rejecting the plan") or "rejected"
         if kind == "review":
             val = payload.get("validation") or {}
-            typer.echo(f"Review {payload.get('mdx_path')}")
+            typer.echo(f"Review {payload.get('md_path')}")
             if val:
                 typer.echo(f"  validation passed: {val.get('passed')}")
             if auto or typer.confirm("Approve and export?", default=True):

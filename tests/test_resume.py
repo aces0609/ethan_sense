@@ -122,7 +122,7 @@ def test_killed_run_resumes_and_only_the_failed_section_runs_again(
     with pytest.raises(RuntimeError, match="simulated kill"):
         run_primer(inputs, run_id=run_id, run_dir=run_dir)
     assert dict(flaky.calls) == {2: 1, 5: 1, 9: 1}
-    assert not (run_dir / "primer.mdx").exists()
+    assert not (run_dir / "primer.md").exists()
     assert (run_dir / "checkpoint.sqlite").exists() and (run_dir / "inputs.json").exists()
     before = get_runlog(run_dir)
     edgar_before = before.counters["edgar_requests"]
@@ -134,13 +134,13 @@ def test_killed_run_resumes_and_only_the_failed_section_runs_again(
 
     # LangGraph kept the finished siblings' writes: only section 5 executed a second time
     assert dict(flaky.calls) == {2: 1, 5: 2, 9: 1}
-    mdx = Path(result["mdx_path"])
-    assert mdx.exists() and mdx.parent == run_dir
-    text = mdx.read_text(encoding="utf-8")
+    md = Path(result["md_path"])
+    assert md.exists() and md.parent == run_dir
+    text = md.read_text(encoding="utf-8")
     for n in SECTIONS:
         assert f"## {n}. " in text
     v = result["validation"]
-    assert v["checks"]["citations"]["ok"] and (v["passed"] or v["checks"]["mdx_compile"]["skipped"])
+    assert v["checks"]["citations"]["ok"] and v["passed"]
 
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     assert run["counters"]["section_runs.2"] == 1
@@ -200,7 +200,7 @@ def test_a_kill_inside_a_section_resumes_at_the_node_that_was_running(
         "section_runs.5": 1,
         "section_runs.9": 1,
     }
-    assert Path(result["mdx_path"]).exists() and run["meta"]["resumed"] == 1
+    assert Path(result["md_path"]).exists() and run["meta"]["resumed"] == 1
 
 
 def test_resume_keeps_recording_so_the_resumed_run_can_still_be_replayed(
@@ -243,7 +243,7 @@ def test_a_killed_replay_resumes_in_replay_mode(edgar_mock, output_dir, monkeypa
     result = resume_primer(replay_dir)
     assert edgar_mock.calls.call_count == n_requests  # the resumed replay stayed offline
     assert dict(flaky.calls) == {2: 1, 5: 2, 9: 1}
-    assert Path(result["mdx_path"]).exists()
+    assert Path(result["md_path"]).exists()
     report = replay_mod.compare_runs(run_dir, replay_dir)
     assert report["primer_identical"], report["diff_head"]
     assert report["replay_misses"] == 0 and report["offline_violations"] == 0

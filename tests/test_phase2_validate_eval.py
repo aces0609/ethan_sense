@@ -89,11 +89,8 @@ def test_conflict_blockquote_lands_in_later_section_and_passes_gate(tmp_path):
     assert out[12].startswith("*Caveat: y.*\n\n> Conflict:")
     assert "> Conflict" not in out[10]
     # the gate treats a disclosed conflict as passing
-    mdx = tmp_path / "p.mdx"
-    mdx.write_text("---\ncompany: X\n---\n", encoding="utf-8")
     rep = run_all(
-        mdx_text="---\ncompany: X\n---\n\nbody",
-        mdx_path=mdx,
+        md_text="---\ncompany: X\n---\n\nbody",
         sections_md=out,
         claims=claims,
         coverage={10: "full", 12: "full"},
@@ -103,8 +100,7 @@ def test_conflict_blockquote_lands_in_later_section_and_passes_gate(tmp_path):
     )
     assert rep.checks["numeric"]["ok"] is True and rep.checks["numeric"]["undisclosed"] == 0
     rep2 = run_all(
-        mdx_text="---\ncompany: X\n---\n\nbody",
-        mdx_path=mdx,
+        md_text="---\ncompany: X\n---\n\nbody",
         sections_md=md,
         claims=claims,
         coverage={10: "full", 12: "full"},

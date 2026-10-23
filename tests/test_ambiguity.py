@@ -105,7 +105,7 @@ def test_close_scores_interrupt_and_resume_with_a_cik(ambiguous, output_dir):
     assert {c["ticker"] for c in seen[0]["candidates"]} == {"LMT", "LMSP"}
     ent = _entity(run)
     assert ent["cik"] == LMT_CIK and ent["is_public"] is True and ent["private"] is False
-    assert Path(run["mdx_path"]).exists()
+    assert Path(run["md_path"]).exists()
     meta = json.loads((Path(run["run_dir"]) / "run.json").read_text(encoding="utf-8"))["meta"]
     assert meta["interrupts"] == [{"kind": "choose_entity", "answer": LMT_CIK}]
 
@@ -147,7 +147,7 @@ def test_without_a_callback_the_run_raises_interrupt_required(ambiguous, output_
 
     # the checkpoint holds the paused run: answering later finishes it
     final = answer_interrupt(err.run_dir, LMT_CIK)
-    assert Path(final["mdx_path"]).exists()
+    assert Path(final["md_path"]).exists()
     run_json = json.loads((Path(err.run_dir) / "run.json").read_text(encoding="utf-8"))
     assert run_json["meta"]["entity"]["cik"] == LMT_CIK
     assert run_json["meta"].get("status") != "paused"
@@ -173,7 +173,7 @@ def test_debug_interrupts_resume_with_approve(edgar_mock, output_dir):
 
     run = run_primer(_inputs(ticker="LMT", debug=True, sections=[1, 9]), on_interrupt=approve)
     assert seen == ["plan", "review"]
-    assert Path(run["mdx_path"]).exists()
+    assert Path(run["md_path"]).exists()
     assert not [e for e in (run["errors"] or []) if "rejected" in e]
 
 
@@ -187,7 +187,7 @@ def test_debug_interrupts_carry_the_plan_and_the_review_summary(edgar_mock, outp
     run_primer(_inputs(ticker="LMT", debug=True, sections=[1, 9]), on_interrupt=grab)
     plan, review = payloads
     assert "9" in {str(k) for k in plan["plan"]}
-    assert review["mdx_path"].endswith("primer.mdx") and "validation" in review
+    assert review["md_path"].endswith("primer.md") and "validation" in review
 
 
 def test_debug_interrupts_resume_with_a_rejection(edgar_mock, output_dir):
@@ -204,7 +204,7 @@ def test_debug_run_without_a_callback_raises(edgar_mock, output_dir):
         run_primer(_inputs(ticker="LMT", debug=True, sections=[1, 9]))
     assert interrupt_kind(exc.value.payload) == "plan"
     final = answer_interrupt(exc.value.run_dir, "approve", on_interrupt=lambda p: "approve")
-    assert Path(final["mdx_path"]).exists()
+    assert Path(final["md_path"]).exists()
 
 
 # ---- the command line -------------------------------------------------------------------------
@@ -213,7 +213,7 @@ def test_debug_run_without_a_callback_raises(edgar_mock, output_dir):
 def test_cli_yes_auto_approves_plan_and_review():
     prompter = make_cli_prompter(yes=True)
     assert prompter({"message": "Approve the section plan", "plan": {}}) == "approve"
-    assert prompter({"message": "Review", "mdx_path": "x/primer.mdx", "validation": {}}) == (
+    assert prompter({"message": "Review", "md_path": "x/primer.md", "validation": {}}) == (
         "approve"
     )
 
@@ -255,7 +255,7 @@ def test_cli_interactive_prompts(monkeypatch):
         "wrong sections"
     )
     monkeypatch.setattr(typer, "confirm", lambda *a, **k: True)
-    assert make_cli_prompter(interactive=True)({"mdx_path": "p.mdx"}) == "approve"
+    assert make_cli_prompter(interactive=True)({"md_path": "p.md"}) == "approve"
 
 
 def test_cli_run_with_an_ambiguous_name_exits_with_the_candidates(ambiguous, output_dir):
@@ -272,4 +272,4 @@ def test_cli_run_cik_flag_fixes_the_ambiguity(ambiguous, output_dir):
         app, ["run", "--company", "Lockheed Martin", "--sections", "1,9", "--cik", LMT_CIK]
     )
     assert result.exit_code == 0, result.output
-    assert '"mdx_path"' in result.output
+    assert '"md_path"' in result.output

@@ -185,8 +185,8 @@ def test_record_then_replay_reproduces_the_primer(edgar_mock, output_dir, monkey
     assert (orig / "replay" / "edgar").is_dir()
     saved = json.loads((orig / "inputs.json").read_text(encoding="utf-8"))
     assert saved["inputs"]["as_of_date"] == "2026-10-21" and saved["inputs"]["sections"] == [1, 9]
-    mdx = (orig / "primer.mdx").read_text(encoding="utf-8")
-    assert "| Revenue | 65,984[^" in mdx
+    md = (orig / "primer.md").read_text(encoding="utf-8")
+    assert "| Revenue | 65,984[^" in md
     network_calls = edgar_mock.calls.call_count
     assert network_calls > 0
 
@@ -208,8 +208,8 @@ def test_record_then_replay_reproduces_the_primer(edgar_mock, output_dir, monkey
     assert report["ok"]
 
     # run ids differ and nothing else does; the replay primer says which run it replays
-    a = mdx
-    b = (rep_dir / "primer.mdx").read_text(encoding="utf-8")
+    a = md
+    b = (rep_dir / "primer.md").read_text(encoding="utf-8")
     assert a != b and re.sub(r"(run_id|trace_id): \S+\n", "", a) == re.sub(
         r"(run_id|trace_id): \S+\n", "", b
     )
@@ -282,8 +282,8 @@ def test_replay_in_a_fresh_process_with_another_hash_seed(
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "primer.mdx: identical" in proc.stdout and "replay_misses=0" in proc.stdout
-    assert (orig.parent / f"{orig.name}-replay" / "primer.mdx").exists()
+    assert "primer.md: identical" in proc.stdout and "replay_misses=0" in proc.stdout
+    assert (orig.parent / f"{orig.name}-replay" / "primer.md").exists()
 
 
 def test_a_deleted_recording_entry_shows_up_as_a_miss(edgar_mock, output_dir):
@@ -307,7 +307,7 @@ def test_a_missing_filing_document_is_a_miss_but_the_run_still_completes(edgar_m
     orig = _run_original([1, 9], output_dir)
     _delete_entry(orig, "edgar", "/Archives/edgar/data/")  # one filing document
     result = replay_mod.replay_primer(orig)
-    assert "error" not in result and Path(result["mdx_path"]).exists()
+    assert "error" not in result and Path(result["md_path"]).exists()
     report = replay_mod.compare_runs(orig, result["replay_dir"])
     assert report["replay_misses"] >= 1 and not report["ok"]
 
@@ -356,8 +356,8 @@ def test_second_run_of_the_same_ticker_makes_no_edgar_or_firecrawl_requests(
     # the foundation pack is the same pack, served from the cache
     assert r2.meta["foundation"] == foundation_1
     assert r2.meta["foundation"]["transcripts"]["found"] >= 1
-    p1 = (Path(first["run_dir"]) / "primer.mdx").read_text(encoding="utf-8")
-    p2 = (Path(second["run_dir"]) / "primer.mdx").read_text(encoding="utf-8")
+    p1 = (Path(first["run_dir"]) / "primer.md").read_text(encoding="utf-8")
+    p2 = (Path(second["run_dir"]) / "primer.md").read_text(encoding="utf-8")
     strip = lambda t: re.sub(r"(run_id|trace_id): \S+\n", "", t)  # noqa: E731
     assert strip(p1) == strip(p2)
 
@@ -463,7 +463,7 @@ def test_cli_replay_exits_0_on_an_identical_replay_and_1_on_a_miss(edgar_mock, o
     orig = _run_original([1, 9], output_dir)
     res = CliRunner().invoke(app, ["replay", str(orig)])
     assert res.exit_code == 0, res.output
-    assert "primer.mdx: identical" in res.output
+    assert "primer.md: identical" in res.output
     assert "replay_misses=0" in res.output and "sources.json: identical" in res.output
 
     _delete_entry(orig, "edgar", "/Archives/edgar/data/")
@@ -472,7 +472,7 @@ def test_cli_replay_exits_0_on_an_identical_replay_and_1_on_a_miss(edgar_mock, o
     assert "replay_misses=" in res.output and "missed: edgar:" in res.output
     # with the diff: a miss fails the replay even when the primer text came out the same
     res = CliRunner().invoke(app, ["replay", str(orig)])
-    assert res.exit_code == 1 and "primer.mdx:" in res.output and "missed: edgar:" in res.output
+    assert res.exit_code == 1 and "primer.md:" in res.output and "missed: edgar:" in res.output
 
 
 def test_replay_uses_the_runs_config_snapshot_not_todays_config(
@@ -508,7 +508,7 @@ def test_replay_uses_the_runs_config_snapshot_not_todays_config(
         assert result["config_snapshot"] is True
         report = replay_mod.compare_runs(orig, Path(result["replay_dir"]))
         assert report["primer_identical"], report["diff_head"]
-        assert "CHANGED AFTER THE RUN" not in (orig / "primer.mdx").read_text(encoding="utf-8")
+        assert "CHANGED AFTER THE RUN" not in (orig / "primer.md").read_text(encoding="utf-8")
         # the replay put the config in effect back to the one it found, not the repo default
         assert cfg.CONFIG_DIR == cfg.DEFAULT_CONFIG_DIR
     finally:

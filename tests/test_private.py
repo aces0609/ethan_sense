@@ -30,7 +30,7 @@ from primer.graph.main import (
     run_primer,
 )
 from primer.graph.researcher import build_researcher
-from primer.render.mdx import render
+from primer.render.markdown import render
 from primer.sections import private as pv
 from primer.state import Entity, Inputs
 from primer.validate.rules import check_tier
@@ -556,9 +556,7 @@ def _assert_honest_gate(run):
     assert ch["citations"]["ok"] and ch["tokens"]["ok"], ch["citations"]
     assert ch["tier"]["ok"] and not ch["tier"]["press_unsourced"]
     assert ch["numeric"]["ok"] and ch["coverage"]["ok"], ch["coverage"]
-    assert v["passed"] is True or ch["mdx_compile"].get("skipped"), {
-        k: c for k, c in ch.items() if c.get("ok") is False
-    }
+    assert v["passed"] is True, {k: c for k, c in ch.items() if c.get("ok") is False}
 
 
 def test_full_private_run_on_acme_passes_the_gate(
@@ -570,8 +568,8 @@ def test_full_private_run_on_acme_passes_the_gate(
     run_dir = Path(run["run_dir"])
     assert private_edgar.blocked.call_count == 0  # no submissions, no companyfacts
 
-    mdx = (run_dir / "primer.mdx").read_text(encoding="utf-8")
-    fm = yaml.safe_load(mdx.split("---")[1])
+    md = (run_dir / "primer.md").read_text(encoding="utf-8")
+    fm = yaml.safe_load(md.split("---")[1])
     assert fm["is_public"] is False and fm["cik"] is None and fm["ticker"] is None
     assert (
         "Private company: no SEC financial statements; financial figures are press-reported and unaudited"
@@ -582,10 +580,10 @@ def test_full_private_run_on_acme_passes_the_gate(
         assert fm["coverage"][sec] in ("partial", "unavailable")
     assert fm["coverage"]["4"] == "not_applicable"
     assert (
-        "## 9. Historical Financial Performance" in mdx
-        and "Press-reported figures (unaudited)" in mdx
+        "## 9. Historical Financial Performance" in md
+        and "Press-reported figures (unaudited)" in md
     )
-    assert "[src_" not in mdx
+    assert "[src_" not in md
 
     claims = json.loads((run_dir / "claims.json").read_text(encoding="utf-8"))
     assert claims and all(c["source_ids"] for c in claims)
@@ -640,8 +638,8 @@ def test_private_switch_on_lmt_skips_every_sec_filing_call(
     assert run["coverage"][4] in ("full", "partial")
     for n in (9, 11, 13):
         assert run["coverage"][n] in ("partial", "unavailable")
-    mdx = (run_dir / "primer.mdx").read_text(encoding="utf-8")
-    assert "is_public: false" in mdx and "cik: null" in mdx
+    md = (run_dir / "primer.md").read_text(encoding="utf-8")
+    assert "is_public: false" in md and "cik: null" in md
     _assert_honest_gate(run)
     assert fc.calls
 
@@ -650,8 +648,8 @@ def test_public_runs_do_not_carry_the_private_source_limit(edgar_mock, output_di
     run = run_primer(
         Inputs(company_name="Lockheed Martin", ticker="LMT", as_of_date=AS_OF, sections=[1, 9])
     )
-    mdx = (Path(run["run_dir"]) / "primer.mdx").read_text(encoding="utf-8")
-    fm = yaml.safe_load(mdx.split("---")[1])
+    md = (Path(run["run_dir"]) / "primer.md").read_text(encoding="utf-8")
+    fm = yaml.safe_load(md.split("---")[1])
     assert fm["is_public"] is True and len(fm["source_limits"]) == 2
     assert not any("Private company" in s for s in fm["source_limits"])
 
@@ -659,7 +657,7 @@ def test_public_runs_do_not_carry_the_private_source_limit(edgar_mock, output_di
 def test_render_adds_the_source_limit_only_for_private_entities(output_dir):
     store = EvidenceStore.for_run(output_dir / "r", as_of=AS_OF)
     for private, n in ((True, 3), (False, 2)):
-        mdx, _, _ = render(
+        md, _, _ = render(
             entity={
                 "name": "X",
                 "ticker": None,
@@ -675,7 +673,7 @@ def test_render_adds_the_source_limit_only_for_private_entities(output_dir):
             store=store,
             requested=[2],
         )
-        assert len(yaml.safe_load(mdx.split("---")[1])["source_limits"]) == n
+        assert len(yaml.safe_load(md.split("---")[1])["source_limits"]) == n
     assert EdgarClient  # imported for the fixtures' side effects only
 
 
@@ -763,7 +761,7 @@ def test_alias_option_reaches_the_inputs_and_the_entity(monkeypatch, tmp_path):
 
     def fake_run(inputs, run_id=None, run_dir=None, on_interrupt=None):
         seen["inputs"] = inputs
-        return {"run_id": "x", "run_dir": str(tmp_path), "mdx_path": None}
+        return {"run_id": "x", "run_dir": str(tmp_path), "md_path": None}
 
     monkeypatch.setattr(gm, "run_primer", fake_run)
     res = CliRunner().invoke(

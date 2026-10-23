@@ -157,7 +157,7 @@ def test_main_graph_runs_section_14_before_the_late_sections(edgar_mock, output_
     assert by_sec[9] == [] and by_sec[14] == []
     assert by_sec[3][0]["date"] == "2026-08-28" and by_sec[3][0]["source_id"] == a
     assert by_sec[6] == by_sec[3]
-    assert Path(result["mdx_path"]).exists()
+    assert Path(result["md_path"]).exists()
 
 
 def test_recent_events_block_for_the_drafter(tmp_path):

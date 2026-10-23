@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from primer.config import llm_available
 from primer.llm import invoke_structured
+from primer.render.markdown import primer_path
 from primer.state import SECTION_TITLES
 from primer.validate.citations import check_citations
 
@@ -100,8 +101,8 @@ def compare_financials(run_dir: Path, golden_path: Path, section: int = 9) -> di
                 }
             )
 
-    mdx = run_dir / "primer.mdx"
-    cit = check_citations(mdx.read_text(encoding="utf-8")) if mdx.exists() else {"ok": None}
+    md = primer_path(run_dir)
+    cit = check_citations(md.read_text(encoding="utf-8")) if md.exists() else {"ok": None}
     cited = all(bool(r.get("source_ids")) for r in rows if r.get("status") in ("match", "MISMATCH"))
     return {
         "golden": str(golden_path),
@@ -303,10 +304,10 @@ def fact_overlap(primer_md: str, golden_text: str, per_section: bool = True) -> 
 
 
 def citation_resolvability(run_dir: Path) -> dict[str, Any]:
-    mdx = run_dir / "primer.mdx"
-    if not mdx.exists():
-        return {"ok": None, "error": "no primer.mdx"}
-    text = mdx.read_text(encoding="utf-8")
+    md = primer_path(run_dir)
+    if not md.exists():
+        return {"ok": None, "error": "no primer.md"}
+    text = md.read_text(encoding="utf-8")
     cit = check_citations(text)
     sources = {}
     sp = run_dir / "sources.json"
@@ -582,8 +583,8 @@ def scorecard(
     sections: list[int] | None = None,
 ) -> dict[str, Any]:
     run_dir = Path(run_dir)
-    mdx = run_dir / "primer.mdx"
-    primer_md = mdx.read_text(encoding="utf-8") if mdx.exists() else ""
+    md = primer_path(run_dir)
+    primer_md = md.read_text(encoding="utf-8") if md.exists() else ""
     ours = split_sections(primer_md)
     golden_text = (
         golden_primer.read_text(encoding="utf-8", errors="replace") if golden_primer else None

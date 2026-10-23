@@ -1,14 +1,10 @@
-"""PLAN 1.9: footnote assignment, citation integrity, numeric conflicts, frontmatter, MDX compile."""
+"""PLAN 1.9: footnote assignment, citation integrity, numeric conflicts, frontmatter."""
 
 from __future__ import annotations
 
-import shutil
-
-import pytest
-
 from primer.render.citations import assign_footnotes
 from primer.validate.citations import check_citations, check_source_tokens_left
-from primer.validate.mdx_compile import SIDECAR, check_frontmatter, check_mdx_compiles
+from primer.validate.frontmatter import check_frontmatter
 from primer.validate.numeric import check_numeric
 
 
@@ -73,22 +69,6 @@ def test_frontmatter_check():
     assert check_frontmatter(ok)["ok"]
     assert not check_frontmatter("# no frontmatter\n")["ok"]
     assert check_frontmatter("---\ncompany: X\n---\n")["missing"]
-
-
-@pytest.mark.skipif(
-    not shutil.which("node") or not (SIDECAR.parent / "node_modules").exists(),
-    reason="node sidecar not installed",
-)
-def test_mdx_compiles_and_rejects_jsx(tmp_path):
-    good = tmp_path / "good.mdx"
-    good.write_text(
-        "---\ncompany: X\n---\n\n## 9. Section\n\nText[^1].\n\n| a | b |\n|---|---:|\n| 1 | 2 |\n\n[^1]: XBRL • SEC • https://www.sec.gov/x_y.htm\n",
-        encoding="utf-8",
-    )
-    assert check_mdx_compiles(good)["ok"] is True
-    bad = tmp_path / "bad.mdx"
-    bad.write_text("## 9\n\nSee <https://www.sec.gov/>\n", encoding="utf-8")
-    assert check_mdx_compiles(bad)["ok"] is False
 
 
 def test_attribution_check_survives_initials_and_a_citation_at_the_end_of_the_line():

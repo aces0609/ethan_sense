@@ -11,13 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - run: uv sync --all-groups
       - run: uv run ruff check src tests
       - run: uv run ruff format --check src tests
-      - run: npm ci --prefix tools
       - run: uv run pytest -q
         env:
           EDGAR_USER_AGENT: "ethan_sense-ci/0.1 (ci@example.com)"

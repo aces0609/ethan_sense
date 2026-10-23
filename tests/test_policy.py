@@ -14,7 +14,7 @@ from primer.clients.edgar import EdgarClient
 from primer.clients.firecrawl import FirecrawlClient, FirecrawlError
 from primer.config import domain_policy, output_root
 from primer.evidence.store import EvidenceStore
-from primer.render.mdx import source_line
+from primer.render.markdown import source_line
 from primer.runlog import RunLog
 from primer.sections.common import SectionBudget, ToolContext, evidence_digest, web_research
 from primer.state import Entity

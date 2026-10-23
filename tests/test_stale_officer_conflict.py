@@ -41,7 +41,9 @@ def _fact(sec, value, sids):
 
 def test_officer_named_in_a_source_years_older_is_not_a_conflict(tmp_path):
     store, old, new = _store(tmp_path)
-    assert _historical_officer_pair(_fact(7, "William Brown", [old]), _fact(14, "Sam Mehta", [new]), store)
+    assert _historical_officer_pair(
+        _fact(7, "William Brown", [old]), _fact(14, "Sam Mehta", [new]), store
+    )
     assert not _historical_officer_pair(
         _fact(8, "Kimberly Fields", [new]), _fact(14, "Sam Mehta", [new]), store
     )

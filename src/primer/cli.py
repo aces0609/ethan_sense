@@ -1,4 +1,4 @@
-"""CLI: primer run | resume | eval | mdx-check."""
+"""CLI: primer run | resume | eval | md-check."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def run(
         "not a TTY); an ambiguous company name then fails, listing the candidates",
     ),
 ) -> None:
-    """Generate a primer. Writes output/{ticker-or-slug}/{run_id}/primer.mdx and friends."""
+    """Generate a primer. Writes output/{ticker-or-slug}/{run_id}/primer.md and friends."""
     from primer.graph.interrupts import InterruptRequired, make_cli_prompter
     from primer.graph.main import run_primer
     from primer.state import Inputs
@@ -156,9 +156,9 @@ def replay(
         }
     if diff:
         if rep["primer_identical"]:
-            typer.echo("primer.mdx: identical")
+            typer.echo("primer.md: identical")
         else:
-            typer.echo(f"primer.mdx: {rep['diff_lines']} differing lines; first 20 diff lines:")
+            typer.echo(f"primer.md: {rep['diff_lines']} differing lines; first 20 diff lines:")
             for line in rep["diff_head"]:
                 typer.echo(_console_safe(line))
         typer.echo(f"sources.json: {'identical' if rep['sources_identical'] else 'DIFFERS'}")
@@ -297,16 +297,16 @@ def eval_set(
     raise typer.Exit(code=0 if report["ok"] else 1)
 
 
-@app.command("mdx-check")
-def mdx_check(path: Path = typer.Argument(...)) -> None:
-    """Compile an .mdx with the Node sidecar."""
-    from primer.validate.mdx_compile import check_frontmatter, check_mdx_compiles
+@app.command("md-check")
+def md_check(path: Path = typer.Argument(...)) -> None:
+    """Check a primer.md: frontmatter keys and citation integrity."""
+    from primer.validate.citations import check_citations
+    from primer.validate.frontmatter import check_frontmatter
 
     text = path.read_text(encoding="utf-8")
-    out = {"frontmatter": check_frontmatter(text), "compile": check_mdx_compiles(path)}
+    out = {"frontmatter": check_frontmatter(text), "citations": check_citations(text)}
     typer.echo(json.dumps(out, indent=2))
-    ok = out["frontmatter"]["ok"] and out["compile"]["ok"] is not False
-    raise typer.Exit(code=0 if ok else 1)
+    raise typer.Exit(code=0 if out["frontmatter"]["ok"] and out["citations"]["ok"] else 1)
 
 
 @app.command()

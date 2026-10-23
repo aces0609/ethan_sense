@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from pathlib import Path
 from typing import Any
 
 from primer.evidence.store import EvidenceStore
 from primer.validate.citations import check_citations, check_source_tokens_left
 from primer.validate.exhibits import check_exhibits_gate
-from primer.validate.mdx_compile import check_frontmatter, check_mdx_compiles
+from primer.validate.frontmatter import check_frontmatter
 from primer.validate.numeric import check_numeric
 from primer.validate.rules import (
     check_attribution,
@@ -37,8 +36,7 @@ class ValidationReport:
 
 def run_all(
     *,
-    mdx_text: str,
-    mdx_path: Path,
+    md_text: str,
     sections_md: dict[int, str],
     claims: list[dict[str, Any]],
     coverage: dict[int, str],
@@ -47,10 +45,9 @@ def run_all(
     as_of: date,
 ) -> ValidationReport:
     checks: dict[str, Any] = {
-        "citations": check_citations(mdx_text),
-        "tokens": check_source_tokens_left(mdx_text),
-        "frontmatter": check_frontmatter(mdx_text),
-        "mdx_compile": check_mdx_compiles(mdx_path),
+        "citations": check_citations(md_text),
+        "tokens": check_source_tokens_left(md_text),
+        "frontmatter": check_frontmatter(md_text),
         "numeric": check_numeric(claims),
         "tier": check_tier(claims, store),
         "attribution": check_attribution(sections_md, store),
@@ -99,5 +96,5 @@ def run_all(
         "page_budget",
         "exhibits",
     ]
-    passed = all(checks[k]["ok"] for k in hard) and checks["mdx_compile"]["ok"] is not False
+    passed = all(checks[k]["ok"] for k in hard)
     return ValidationReport(passed=passed, checks=checks, section_notes=notes)

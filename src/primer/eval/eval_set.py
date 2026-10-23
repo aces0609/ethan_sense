@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from primer.config import CONFIG_DIR, REPO_ROOT, output_root
 from primer.eval.harness import scorecard, write_scorecard
+from primer.render.markdown import primer_path
 
 COVERAGE_STATUSES = ("full", "partial", "unavailable", "not_applicable")
 RUN_FLAGS = ("private", "offline", "debug")
@@ -154,7 +155,7 @@ def filter_entries(entries: list[EvalEntry], only: list[str] | None) -> list[Eva
 
 def latest_run_dir(entry: EvalEntry, root: Path | None = None) -> Path | None:
     """The newest run directory under output/{slug}/ (by the mtime of its run.json or
-    primer.mdx), or None when the entry has never run."""
+    primer.md), or None when the entry has never run."""
     base = (root or output_root()) / entry.slug
     if not base.is_dir():
         return None
@@ -162,7 +163,7 @@ def latest_run_dir(entry: EvalEntry, root: Path | None = None) -> Path | None:
     for d in base.iterdir():
         if not d.is_dir():
             continue
-        stamps = [(d / n).stat().st_mtime for n in ("run.json", "primer.mdx") if (d / n).exists()]
+        stamps = [p.stat().st_mtime for p in (d / "run.json", primer_path(d)) if p.exists()]
         if stamps and (best is None or max(stamps) > best[0]):
             best = (max(stamps), d)
     return best[1] if best else None

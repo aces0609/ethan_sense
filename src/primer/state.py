@@ -192,7 +192,7 @@ class PrimerState(TypedDict, total=False):
     errors: Annotated[list[str], operator.add]
     validation: dict[str, Any]
     retries: Annotated[dict[int, int], dict_merge]
-    mdx_path: str
+    md_path: str
     key_takeaways: str
     # section 14's dated events ({date, event, detail, source_id}), set by propagate_recent
     # after the first researcher wave and passed to the sections that read them

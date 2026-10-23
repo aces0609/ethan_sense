@@ -1,6 +1,6 @@
 # ethan_sense
 
-Company Primer Agent: give it a company name (and ticker, if public) and it writes a 14-section company primer as a single `.mdx` file, every factual claim cited to a fetched source. Built on LangGraph, Firecrawl, SEC EDGAR and US-government open-data APIs. No paid data subscription in v1.
+Company Primer Agent: give it a company name (and ticker, if public) and it writes a 14-section company primer as a single `.md` file, every factual claim cited to a fetched source. Built on LangGraph, Firecrawl, SEC EDGAR and US-government open-data APIs. No paid data subscription in v1.
 
 **Status:** Phase 2 (fan-out) implemented: all thirteen researched sections plus Key Takeaways, the market-data adapter, the full validation gate and the eval scorecard. See [PLAN.md](PLAN.md) for the phases and gate status and [docs/DECISIONS.md](docs/DECISIONS.md) for the decisions and measurements.
 
@@ -44,7 +44,7 @@ Output lands in `output/{TICKER}/{run_id}/`:
 
 | File | Contents |
 |---|---|
-| `primer.mdx` | Frontmatter, numbered `##` sections, GFM footnotes, Sources appendix, derived-formula list |
+| `primer.md` | Frontmatter, numbered `##` sections, GFM footnotes, Sources appendix, derived-formula list |
 | `sources.json` | Every cited source with type, tier, URL, fetch time, content hash, `gov_id`, `cited_by`, plus the resolved UEI set |
 | `evidence/` | Raw text of every fetch, one file per source id, plus `index.json` |
 | `run.json` | Briefs, queries, per-node timings, tokens by role, credits, cache hits, critic scores, budgets, validation report, transcript misses |
@@ -63,7 +63,7 @@ uv run primer eval --run-dir output/LMT/<run_id> --ticker LMT
 (`--golden path/to/primer.md` for the judge rubric and fact overlap against a reference primer, `--golden-financials docs/golden/lmt_financials.json` for the to-the-dollar check; `--ticker` picks both from `docs/golden/` or `GOLDEN_DIR` when present.)
 
 ```bash
-uv run primer mdx-check output/LMT/<run_id>/primer.mdx
+uv run primer md-check output/LMT/<run_id>/primer.md
 ```
 
 ```bash
@@ -88,8 +88,8 @@ src/primer/
   evidence/      store (per-run source_id registry), chunking, html
   sections/      briefs, common (ToolContext, budgets, web research, drafting), text_tools, exhibits, secNN_* handlers
   graph/         main graph, foundation pack, researcher subgraph, critic
-  render/        mdx, citations
-  validate/      citations, numeric, tier, attribution, recency, coverage, page budget, takeaways, mdx compile
+  render/        markdown, citations
+  validate/      citations, numeric, tier, attribution, recency, coverage, page budget, takeaways, frontmatter
   eval/          scorecard: judge rubric, fact overlap, citation resolvability, golden financials
 tests/           pytest suite with recorded fixtures and Firecrawl page mocks
 ```

@@ -1,6 +1,6 @@
-"""Render primer.mdx: YAML frontmatter, numbered H2 sections, footnotes, Sources appendix.
+"""Render primer.md: YAML frontmatter, numbered H2 sections, footnotes, Sources appendix.
 
-Plain GitHub-flavored markdown with an .mdx extension: no imports, no JSX, no heading ids.
+Plain GitHub-flavored markdown: no imports, no JSX, no heading ids.
 Citation style in the appendix follows the AlphaSense pattern:
   [^12]: 10-Q • Lockheed Martin Corp • 23 Jul 26 • "Quarterly Report Q2 2026" • https://…
 Government records print their identifier:
@@ -10,6 +10,7 @@ Government records print their identifier:
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -19,6 +20,17 @@ from primer.config import sources_config
 from primer.evidence.store import EvidenceStore
 from primer.render.citations import assign_footnotes
 from primer.state import SECTION_TITLES, SourceRecord
+
+PRIMER_FILE = "primer.md"
+
+
+def primer_path(run_dir: str | Path) -> Path:
+    """The primer file of a run directory. Runs made before the switch to plain markdown
+    wrote primer.mdx; those stay readable (replay, eval-set) and are never renamed."""
+    d = Path(run_dir)
+    legacy = d / "primer.mdx"
+    return d / PRIMER_FILE if (d / PRIMER_FILE).exists() or not legacy.exists() else legacy
+
 
 DISCLAIMER = (
     "This primer was generated automatically from public sources as a research accelerator. "
@@ -59,7 +71,7 @@ def source_line(n: int, rec: SourceRecord) -> str:
         bits.append(rec.publisher)
     bits.append(_fmt_date(rec.published_date))
     bits.append(f'"{rec.title}"')
-    bits.append(rec.url)  # bare URL: MDX reads <url> as JSX; GFM autolinks it
+    bits.append(rec.url)  # bare URL: GFM autolinks it
     if rec.access == "limited":
         bits.append("(access: limited)")
     return f"[^{n}]: " + " • ".join(bits)
@@ -76,7 +88,7 @@ def render(
     store: EvidenceStore,
     requested: list[int],
 ) -> tuple[str, dict[str, list[str]], list[str]]:
-    """Return (mdx text, cited_by, ordered source ids)."""
+    """Return (markdown text, cited_by, ordered source ids)."""
     rewritten, order, cited_by = assign_footnotes(sections_md)
 
     fm = {
