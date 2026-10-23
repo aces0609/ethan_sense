@@ -99,9 +99,13 @@ class AnnualFinancials:
     accessions: dict[str, dict[str, Any]] = field(default_factory=dict)  # accn -> {form, filed, fy}
     fiscal_year_ends: dict[int, date] = field(default_factory=dict)  # fy label -> period end
     fiscal_year_end_date: date | None = None  # latest annual period end in the window
+    labels: dict[int, str] = field(default_factory=dict)  # column key -> caption (interim view)
+    interim: bool = False  # columns are 10-Q reporting periods, not fiscal years
 
     @property
     def fiscal_year_end_phrase(self) -> str:
+        if self.interim:
+            return "interim periods from 10-Q filings"
         """For captions: 'fiscal years ending 12/31' or, when the period ends drift
         (52/53-week years), '52/53-week fiscal years, latest ending 2026-01-02'."""
         if self.fiscal_year_end.startswith("52/53") and self.fiscal_year_end_date:
@@ -277,6 +281,16 @@ class EdgarClient:
 
     def companyfacts(self, cik: str) -> dict[str, Any]:
         return self._get(COMPANYFACTS_URL.format(cik=pad_cik(cik)))
+
+    def interim_financials(
+        self, cik: str, fiscal_year_end: str | None = None, as_of: date | None = None
+    ) -> AnnualFinancials:
+        """The 10-Q view for a company with no 10-K yet (see primer.clients.interim)."""
+        from primer.clients.interim import interim_financials
+
+        return interim_financials(
+            self.companyfacts(cik), cik, as_of or date.today(), _declared_mmdd(fiscal_year_end)
+        )
 
     def annual_financials(
         self,

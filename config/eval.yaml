@@ -75,11 +75,11 @@ entries:
     as_of: "2026-10-23"
     sector: aerospace_defense
     note: >-
-      Listed in June 2026 (CIK 1181412), so it runs on the public path. It has no 10-K yet
-      (first one due early 2027) and no annual XBRL facts, only an S-1/424B4 prospectus and
-      10-Qs, so sections 2, 3, 5, 8, 9, 11 and 13 come out unavailable and this entry FAILS until
-      the foundation can fall back to the prospectus (known gap, 2026-10-23). The private-company
-      path is covered by the fixture tests in tests/test_private.py, not by this entry.
+      Listed in June 2026 (CIK 1181412), so it runs on the public path. It has no 10-K yet (first
+      one due early 2027), so the foundation pack reads its IPO prospectus under the 10-K item
+      numbers and sections 9, 11 and 13 come from 10-Q facts: section 9 and the capital and
+      valuation sections stay partial, never full, because no fiscal year of filed financials
+      exists. The private-company path is covered by the fixture tests in tests/test_private.py.
     expect:
       is_public: true
       section9: [full, partial]

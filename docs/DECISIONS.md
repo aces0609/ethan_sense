@@ -281,3 +281,21 @@ contradictions with its own IPO citations (judge minimum 2.83). The entry now ru
 That run exposed a gap: a newly listed company has no 10-K and no annual XBRL, only an S-1/424B4
 and 10-Qs, so seven sections came out unavailable and section 4 not_applicable (judge minimum
 1.83). The entry fails on purpose until the foundation pack can fall back to the prospectus.
+
+## 2026-10-23: prospectus and 10-Q fallback for a company with no 10-K
+
+SPCX (CIK 1181412) has an S-1/424B4 and 10-Qs but no 10-K and no annual XBRL. The foundation pack
+now registers the final prospectus (424B4, else the latest S-1/A) as a tier-1 source under the
+10-K keys; `chunk_prospectus` maps its sections to the 10-K item numbers (Business 1, Risk Factors
+1A, MD&A 7, financial statements 8, Management 10), so every reader of Item 1/1A/7/8 works
+unchanged. Handler wording follows through `relabel_annual_document` (a peer's 10-K keeps its
+name), and our own caveats say "annual report" so the relabel cannot garble them. Section 9 gets
+interim columns from 10-Q XBRL (`clients/interim.py`: three-month and year-to-date periods plus
+the last year-end balance sheet), always partial; sections 11 and 13 run from the 10-Q instants,
+the price and the share count, with leverage and earnings multiples left n/a. Two defects found
+on the way: a page share count was labelled "XBRL cover page" and failed the tier rule (now
+labelled as a page fallback and exempt), and "AGI" resolved to the registrant "AGI Inc" as
+SpaceX's only peer (technology acronyms are now stop words).
+
+Result (SPCX eval, 2026-10-23): gate passes, judge minimum 3.17 and mean 3.74, 4 sections full and
+10 partial, none unavailable. Before the fallback: 7 unavailable, judge minimum 1.83.

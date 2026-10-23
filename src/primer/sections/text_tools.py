@@ -16,7 +16,27 @@ SUFFIX = re.compile(
     r"\b(corp|corporation|inc|incorporated|co|company|ltd|plc|holdings?|group|limited|sa|nv|ag|se)\b\.?",
     re.I,
 )
+# Technology acronyms a prospectus uses all through its competition text. "AGI" matched the
+# SEC registrant "AGI Inc" and became SpaceX's only peer.
+TECH_ACRONYMS = {
+    "agi",
+    "llm",
+    "llms",
+    "gpu",
+    "gpus",
+    "cpu",
+    "api",
+    "apis",
+    "saas",
+    "arpu",
+    "iot",
+    "leo",
+    "geo",
+    "ai",
+}
+
 STOP = {
+    *TECH_ACRONYMS,
     "the",
     "and",
     "our",

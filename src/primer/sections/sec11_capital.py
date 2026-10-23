@@ -301,13 +301,15 @@ def draft(
             brief, ctx, tool_results, section=11, critic_notes=critic_notes
         )
     fin: AnnualFinancials | None = tool_results.get("financials")
-    if fin is None or not fin.fiscal_years:
+    inst: dict[str, FactValue] = tool_results.get("instants") or {}
+    # a company with no 10-K yet still has 10-Q balance-sheet instants: draft from those
+    if fin is None or (not fin.fiscal_years and not inst):
         return unavailable_draft(
             brief, tool_results.get("error") or "no annual XBRL facts available", ctx
         )
     sids: dict[str, str] = tool_results["accession_source_ids"]
-    inst: dict[str, FactValue] = tool_results.get("instants") or {}
-    fy = fin.fiscal_years[-1]
+    annual = bool(fin.fiscal_years)
+    fy = fin.fiscal_years[-1] if annual else ctx.fy
     vals = _vals(fin, inst, sids, fy)
 
     debt = debt_table(vals, tool_results.get("revolver"), fy, 11)
@@ -336,9 +338,13 @@ def draft(
     )
     coverage = "full" if (debt.present and "gross_leverage" in vals and texts) else "partial"
     if "gross_leverage" not in vals:
-        notes.append("leverage not computable (missing operating income, D&A or debt facts)")
+        notes.append(
+            "no fiscal year of EBITDA or interest is filed yet, so leverage and interest coverage are not computed"
+            if not annual
+            else "leverage not computable (missing operating income, D&A or debt facts)"
+        )
 
-    caveat = _caveat(vals, fy, inst)
+    caveat = _caveat(vals, fy, inst, annual)
     narrative = draft_section(
         ctx,
         brief,
@@ -367,7 +373,7 @@ def draft(
     )
 
 
-def _caveat(vals: dict[str, Val], fy: int, inst: dict[str, FactValue]) -> str:
+def _caveat(vals: dict[str, Val], fy: int, inst: dict[str, FactValue], annual: bool = True) -> str:
     d = (
         vals["cash"].period
         if vals.get("cash")
@@ -376,9 +382,14 @@ def _caveat(vals: dict[str, Val], fy: int, inst: dict[str, FactValue]) -> str:
     form = next((fv.form for fv in inst.values()), "10-Q/10-K")
     return caveat_line(
         f"balance-sheet figures are the latest XBRL instant ({form}, {d}); net debt is total debt − cash − short-term "
-        f"investments, and EBITDA, leverage and interest coverage are derived in-agent for FY{fy} with the definitions in "
-        f"the row names; revolver capacity, maturities and ratings are read from the "
-        f"filing text and cited to it; rating-agency pages are second-hand unless the agency's own release was fetched"
+        + (
+            f"investments, and EBITDA, leverage and interest coverage are derived in-agent for FY{fy} with the definitions in "
+            f"the row names; "
+            if annual
+            else "investments; this company has not yet filed an annual report, so no fiscal year of EBITDA exists and leverage and interest coverage are not computed; "
+        )
+        + "revolver capacity, maturities and ratings are read from the "
+        "filing text and cited to it; rating-agency pages are second-hand unless the agency's own release was fetched"
     )
 
 

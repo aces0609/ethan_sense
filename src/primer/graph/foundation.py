@@ -43,7 +43,7 @@ from primer.sections.text_tools import (
 )
 from primer.state import Entity, FilingRef, Inputs, PrimerState
 
-FORM_TYPES = {"10-K": "10-K", "10-Q": "10-Q", "DEF 14A": "DEF14A"}
+FORM_TYPES = {"10-K": "10-K", "10-Q": "10-Q", "DEF 14A": "DEF14A", "prospectus": "prospectus"}
 WEBSITE_RE = re.compile(r"\b(?:https?://)?(www\.[a-z0-9\-]+\.(?:com|net|org|aero))\b", re.I)
 
 
@@ -334,6 +334,58 @@ def _private_foundation(inputs, ent, store, as_of, found, runlog) -> dict[str, A
     return found
 
 
+PROSPECTUS_FORMS = ("424B4", "424B1", "424B3", "S-1/A", "S-1")
+
+
+def _prospectus_fallback(edgar, store, ent, as_of, found, runlog) -> None:
+    """A company that has not filed a 10-K yet (a recent IPO) is read from its IPO prospectus.
+
+    The final prospectus (424B4, else the latest S-1 amendment) is registered as a tier-1 source
+    and stored under the 10-K keys, because its sections carry the 10-K item numbers
+    (evidence.chunking.chunk_prospectus), so every section that reads Item 1, 1A, 7 or 8 reads the
+    prospectus instead. `found["annual_basis"]` says so; sections that name the document read the
+    label from there rather than saying "10-K"."""
+    for form in PROSPECTUS_FORMS:
+        refs = [
+            r
+            for r in edgar.filings(ent.cik, forms=[form], limit=6)
+            if r.filing_date <= as_of and r.primary_document
+        ]
+        if not refs:
+            continue
+        ref = refs[0]
+        title = f"IPO prospectus ({form}) filed {ref.filing_date}"
+        try:
+            sid = _register_filing(edgar, store, ent, ref, "prospectus", title)
+        except Exception as e:  # noqa: BLE001 - the pack degrades to no annual document
+            runlog.error(f"foundation prospectus fetch {ref.accession}: {e!r}")
+            return
+        if not sid:
+            continue
+        chunks = chunk_by_item(store.text(sid))
+        found["annual_basis"] = {
+            "kind": "prospectus",
+            "form": form,
+            "source_id": sid,
+            "filed": str(ref.filing_date),
+            "label": f"IPO prospectus ({form})",
+        }
+        found["filings"]["10-K"] = []  # none filed: the fiscal year falls back to as_of.year - 1
+        found["sources"]["10-K"] = [sid]
+        found["chunks"]["10-K"] = [
+            {
+                "source_id": sid,
+                "items": [
+                    {"item": c.item, "title": c.title[:80], "chars": len(c.text)} for c in chunks
+                ],
+            }
+        ]
+        runlog.meta.setdefault("foundation_notes", []).append(
+            f"no 10-K filed: annual document is the {form} prospectus filed {ref.filing_date}"
+        )
+        return
+
+
 def _filings(edgar, store, ent, as_of, found, runlog) -> None:
     want = {"10-K": 1, "10-Q": 2, "DEF 14A": 1}
     for form, n in want.items():
@@ -368,6 +420,8 @@ def _filings(edgar, store, ent, as_of, found, runlog) -> None:
                         ],
                     }
                 )
+    if not found["sources"].get("10-K"):
+        _prospectus_fallback(edgar, store, ent, as_of, found, runlog)
     eightks = [
         r
         for r in edgar.filings(ent.cik, forms=["8-K"], since=trailing_months(as_of, 15))

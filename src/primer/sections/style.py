@@ -102,3 +102,24 @@ def coverage_line(status: str, detail: str) -> str:
 def conflict_line(metric: str, pairs: list[tuple[str, str]]) -> str:
     parts = " and ".join(f"{v} {cite}" for v, cite in pairs)
     return f"> Conflict: {metric} reported as {parts}; sources differ."
+
+
+# ---- a company with no 10-K yet: its annual document is the IPO prospectus --------------------
+
+_PROSPECTUS_ITEMS = {
+    "1A": "IPO prospectus Risk Factors",
+    "1": "IPO prospectus Business section",
+    "7": "IPO prospectus MD&A",
+    "8": "IPO prospectus financial statements",
+    "10": "IPO prospectus Management section",
+}
+_OWN_TENK_ITEM = re.compile(r"(?<!peer )(?<!peers' )(?<!peer's )\b10-K Item (\d{1,2}[A-C]?)\b")
+_OWN_TENK = re.compile(r"(?<!peer )(?<!peers' )(?<!peer's )\b10-K\b")
+
+
+def relabel_annual_document(md: str, label: str = "IPO prospectus") -> str:
+    """Handlers write "10-K" for the company's annual document. For a company with no 10-K yet
+    that document is its IPO prospectus (foundation `annual_basis`), so the wording follows it;
+    a peer's 10-K keeps its name."""
+    md = _OWN_TENK_ITEM.sub(lambda m: _PROSPECTUS_ITEMS.get(m.group(1), label), md)
+    return _OWN_TENK.sub(label, md)

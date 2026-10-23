@@ -39,6 +39,7 @@ from primer.sections.common import (
     run_memo,
     unavailable_draft,
 )
+from primer.sections.style import relabel_annual_document
 from primer.sections.text_tools import segment_names_from_text
 from primer.state import SECTION_TITLES, Brief, Entity, ResearcherState, SectionDraft
 from primer.validate.exhibits import apply_exhibit_check
@@ -250,6 +251,8 @@ def compress_and_draft(state: ResearcherState) -> dict[str, Any]:
                 d = unavailable_draft(brief, f"draft failed: {e!r}"[:300], ctx)
     if d.title != SECTION_TITLES[brief.section]:
         d.title = SECTION_TITLES[brief.section]
+    if (ctx.foundation or {}).get("annual_basis"):
+        d.markdown = relabel_annual_document(d.markdown)
     d.iterations = int(state.get("iteration", 0)) + 1
     return {"draft": d.model_dump(mode="json"), "iteration": d.iterations}
 

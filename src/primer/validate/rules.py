@@ -101,6 +101,9 @@ PRESS_PREFIXES = ("press_", "form_d_")
 def check_tier(claims: list[dict[str, Any]], store: EvidenceStore) -> dict:
     """A statement number cited only to tier-2 pages when companyfacts has the concept is flagged.
 
+    A value labelled `page:` was read from a page only after the XBRL concept proved unavailable
+    (a share count when the filings carry no cover-page fact); it is exempt.
+
     Press-reported private-company datapoints (`press_*`, `form_d_*`) are exempt from the tier
     preference; one with no resolvable source id is reported in `press_unsourced` and fails
     the check."""
@@ -117,6 +120,8 @@ def check_tier(claims: list[dict[str, Any]], store: EvidenceStore) -> dict:
             continue
         if c["metric"] not in statement_metrics or not c.get("source_ids"):
             continue
+        if str(c.get("concept") or "").startswith("page:"):
+            continue  # a page value taken after the adapter found the XBRL concept unavailable
         tiers = {store.get(s).tier for s in c["source_ids"] if store.has(s)}
         if tiers and 1 not in tiers:
             flagged.append(

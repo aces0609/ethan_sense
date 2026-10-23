@@ -21,6 +21,7 @@ from primer.sections import private
 from primer.sections.common import ToolContext
 from primer.sections.exhibits import financial_tables
 from primer.sections.exhibits_sec13 import NET_DEBT_FORMULA, net_debt_formula
+from primer.sections.interim_draft import draft_interim_section9
 from primer.sections.style import HOUSE_STYLE, fmt_money, fmt_pct
 from primer.state import Brief, Claim, Entity, SectionDraft
 
@@ -58,6 +59,13 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
         fiscal_year_end=item.get("fiscal_year_end"),
         as_of=date.fromisoformat(item["as_of"]),
     )
+    if not fin.fiscal_years:
+        # no 10-K yet (a recent IPO): the 10-Q periods stand in for fiscal years
+        interim = edgar.interim_financials(
+            entity.cik, fiscal_year_end=item.get("fiscal_year_end"), as_of=ctx.as_of
+        )
+        if interim.fiscal_years:
+            fin = interim
     accession_sids = register_accessions(fin, entity, store, edgar)
     return {"financials": fin, "accession_source_ids": accession_sids}
 
@@ -87,7 +95,7 @@ def register_accessions(
         ]
         content = (
             f"# EDGAR XBRL companyfacts — {info['form']} filed {info['filed']} (accession {accn})\n\n"
-            f"Source API: {api_url}\n\nSelected annual facts reported in this filing:\n\n```json\n"
+            f"Source API: {api_url}\n\nSelected {'interim' if fin.interim else 'annual'} facts reported in this filing:\n\n```json\n"
             + json.dumps(facts, indent=1)
             + "\n```\n"
         )
@@ -133,6 +141,9 @@ def draft(
             coverage="unavailable",
             caveat=None,
         )
+
+    if fin.interim:
+        return draft_interim_section9(brief, ctx, tool_results, critic_notes)
 
     sids = tool_results["accession_source_ids"]
     ex = financial_tables(fin, sids, section=9)

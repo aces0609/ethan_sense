@@ -173,6 +173,17 @@ def instant_vals(inst: dict[str, FactValue], sids: dict[str, str]) -> dict[str, 
     return out
 
 
+def _shares_val(d: Any) -> Val | None:
+    """The share count, labelled by where it came from: the adapter tries the XBRL cover page
+    first and notes "page value used" when it fell back to a scraped statistics page."""
+    if d is not None and "page value used" in (getattr(d, "note", None) or ""):
+        v = _datum_val(d, "scraped statistics page (no XBRL cover-page count)", "shares")
+        if v:
+            v.concept = PAGE_FALLBACK_CONCEPT
+        return v
+    return _datum_val(d, "XBRL dei cover page", "shares", "dei:EntityCommonStockSharesOutstanding")
+
+
 def _datum_val(d: Any, basis: str, unit: str, concept: str | None = None) -> Val | None:
     if d is None or not getattr(d, "ok", False):
         return None
@@ -184,6 +195,9 @@ def _datum_val(d: Any, basis: str, unit: str, concept: str | None = None) -> Val
         unit,
         concept,
     )
+
+
+PAGE_FALLBACK_CONCEPT = "page:shares_outstanding"  # a page value used after XBRL was unavailable
 
 
 # ---- handler ------------------------------------------------------------------------------
@@ -348,13 +362,15 @@ def draft(
             brief, ctx, tool_results, section=13, critic_notes=critic_notes
         )
     fin: AnnualFinancials | None = tool_results.get("financials")
-    if fin is None or not fin.fiscal_years:
+    inst: dict[str, FactValue] = tool_results.get("instants") or {}
+    # a company with no 10-K yet is valued on its price, share count and 10-Q balance sheet
+    if fin is None or (not fin.fiscal_years and not inst):
         return unavailable_draft(
             brief, tool_results.get("error") or "no annual XBRL facts available", ctx
         )
     sids: dict[str, str] = tool_results["accession_source_ids"]
-    inst: dict[str, FactValue] = tool_results.get("instants") or {}
-    fy = fin.fiscal_years[-1]
+    annual = bool(fin.fiscal_years)
+    fy = fin.fiscal_years[-1] if annual else ctx.fy
     quote = tool_results.get("quote")
     shares = tool_results.get("shares")
     consensus = tool_results.get("consensus")
@@ -366,9 +382,7 @@ def draft(
     price = _datum_val(quote.price, "Stooq close", "USD/shares") if quote is not None else None
     if price:
         vals["price"] = price
-    sv = _datum_val(
-        shares, "XBRL dei cover page", "shares", "dei:EntityCommonStockSharesOutstanding"
-    )
+    sv = _shares_val(shares)
     if sv:
         vals["shares"] = sv
     vals = derive(vals, fy)
@@ -417,7 +431,11 @@ def draft(
     if not peers.present:
         notes.append("peer multiples not computable: " + "; ".join(peers.notes or ["no peer data"]))
 
-    caveat = _caveat(ctx, vals, fy, quote, shares, consensus)
+    if not annual:
+        notes.append(
+            "no fiscal year of EBITDA or revenue is filed yet (no annual report), so earnings multiples are n/a"
+        )
+    caveat = _caveat(ctx, vals, fy, quote, shares, consensus, annual)
     narrative = draft_section(
         ctx,
         brief,
@@ -447,7 +465,13 @@ def draft(
 
 
 def _caveat(
-    ctx: ToolContext, vals: dict[str, Val], fy: int, quote: Any, shares: Any, consensus: Any
+    ctx: ToolContext,
+    vals: dict[str, Val],
+    fy: int,
+    quote: Any,
+    shares: Any,
+    consensus: Any,
+    annual: bool = True,
 ) -> str:
     price = vals.get("price")
     bits = []
@@ -457,10 +481,22 @@ def _caveat(
         bits.append("no share price was available, so price-dependent multiples are n/a")
     sh = vals.get("shares")
     if sh:
-        bits.append(f"shares outstanding are the XBRL cover-page count as of {sh.period}")
+        if sh.concept == PAGE_FALLBACK_CONCEPT:
+            bits.append(
+                f"shares outstanding are the count on a scraped statistics page as of {sh.period}, "
+                "because the filings carry no XBRL cover-page count"
+            )
+        else:
+            bits.append(f"shares outstanding are the XBRL cover-page count as of {sh.period}")
     bits.append(
-        f"market cap, EV (market cap + total debt − cash − short-term investments), EBITDA (FY{fy}) and every "
-        "multiple are derived in-agent with the formulas shown; LTM and NTM figures are kept in separate tables"
+        "market cap, EV (market cap + total debt − cash − short-term investments)"
+        + (f", EBITDA (FY{fy})" if annual else "")
+        + " and every multiple are derived in-agent with the formulas shown; LTM and NTM figures are kept in separate tables"
+        + (
+            ""
+            if annual
+            else "; the company has not yet filed an annual report, so no fiscal year of earnings exists"
+        )
     )
     if consensus is not None and consensus.source_id:
         bits.append(

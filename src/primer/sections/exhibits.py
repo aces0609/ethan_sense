@@ -44,7 +44,10 @@ def financial_tables(
     if not fys:
         return ExhibitResult("", [], [], False, ["no annual XBRL facts found"])
 
-    header = "| Metric | " + " | ".join(f"FY{fy}" for fy in fys) + " |"
+    def plabel(fy: int) -> str:
+        return fin.labels.get(fy, f"FY{fy}")
+
+    header = "| Metric | " + " | ".join(plabel(fy) for fy in fys) + " |"
     sep = "|---|" + "---:|" * len(fys)
 
     def cell(metric: str, fy: int, spec: dict) -> str:
@@ -89,7 +92,7 @@ def financial_tables(
                     metric=metric,
                     value=dv,
                     unit=unit,
-                    period=f"FY{fy}",
+                    period=plabel(fy),
                     source_ids=sids,
                     concept="derived",
                     note=derived_note(spec, lambda m, fy=fy: fin.value(m, fy)),
@@ -101,7 +104,9 @@ def financial_tables(
     titles = {
         "income_statement": "Income statement",
         "cash_flow": "Cash flow",
-        "balance_sheet": "Balance sheet (fiscal year end)",
+        "balance_sheet": "Balance sheet (period end of each column)"
+        if fin.interim
+        else "Balance sheet (fiscal year end)",
     }
     for stmt, metrics in cfg["statements"].items():
         rows = [
@@ -140,7 +145,7 @@ def financial_tables(
                     metric=key,
                     value=r,
                     unit="pure",
-                    period=f"FY{fy}",
+                    period=plabel(fy),
                     source_ids=[],
                     concept="derived",
                     note=spec["formula"],
@@ -159,7 +164,7 @@ def financial_tables(
         )
 
     for metric, miss in fin.missing.items():
-        notes.append(f"{metric}: no XBRL fact for {', '.join(f'FY{fy}' for fy in miss)}")
+        notes.append(f"{metric}: no XBRL fact for {', '.join(plabel(fy) for fy in miss)}")
     restated = [fv for m in fin.facts.values() for fv in m.values() if fv.restated_from]
     if restated:
         notes.append(
