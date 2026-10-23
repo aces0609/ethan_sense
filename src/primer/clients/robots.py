@@ -49,6 +49,9 @@ DEFAULT_TOKEN = "ethan_sense"
 _PARSERS: dict[tuple[str, str, str], robotparser.RobotFileParser | None] = {}
 _ORIGIN_LOCKS: dict[tuple[str, str, str], threading.Lock] = {}
 _REG_LOCK = threading.Lock()
+# a robots.txt fetch that failed, by the same key as _PARSERS: (error type, message). A later run in
+# the same process answers from the memo, so it re-records the failure for its own replay.
+_FAILED: dict[tuple[str, str, str], tuple[str, str]] = {}
 
 
 def robots_config() -> dict[str, Any]:
@@ -74,6 +77,7 @@ def reset_memo() -> None:
     with _REG_LOCK:
         _PARSERS.clear()
         _ORIGIN_LOCKS.clear()
+        _FAILED.clear()
 
 
 def _host_matches(host: str, domains: list[str]) -> bool:
@@ -107,14 +111,23 @@ def _parser_for(
 ) -> tuple[robotparser.RobotFileParser | None, str]:
     """(parser or None, note). None means allow everything; the note explains why."""
     key = (str(cache.dir), origin, date.today().isoformat())
+
+    def memo_hit() -> tuple[robotparser.RobotFileParser | None, str]:
+        failed = _FAILED.get(key)
+        if failed:
+            cache.record_failure(f"robots {origin}", *failed)
+        else:
+            cache.record_hit(f"robots {origin}")
+        return _PARSERS[key], "memo"
+
     with _REG_LOCK:
         if key in _PARSERS:
-            return _PARSERS[key], "memo"
+            return memo_hit()
         lock = _ORIGIN_LOCKS.setdefault(key, threading.Lock())
     with lock:
         with _REG_LOCK:
             if key in _PARSERS:
-                return _PARSERS[key], "memo"
+                return memo_hit()
         parser: robotparser.RobotFileParser | None = None
         note = ""
         try:
@@ -130,7 +143,9 @@ def _parser_for(
             except Exception as e:  # network error, respx's all-mocked assertion, anything
                 _count(runlog, "robots_fetch_errors")
                 log.warning("robots.txt fetch failed for %s: %r", origin, e)
+                cache.record_failure(f"robots {origin}", type(e).__name__, repr(e))
                 with _REG_LOCK:
+                    _FAILED[key] = (type(e).__name__, repr(e))
                     _PARSERS[key] = None
                 return None, f"robots.txt fetch failed ({type(e).__name__})"
             if status < 500:
@@ -138,7 +153,9 @@ def _parser_for(
             else:
                 _count(runlog, "robots_fetch_errors")
                 log.warning("robots.txt fetch for %s returned %s", origin, status)
+                cache.record_failure(f"robots {origin}", "HTTPStatus", f"HTTP {status}")
                 with _REG_LOCK:
+                    _FAILED[key] = ("HTTPStatus", f"HTTP {status}")
                     _PARSERS[key] = None
                 return None, f"robots.txt fetch failed (HTTP {status})"
         if status == 200:

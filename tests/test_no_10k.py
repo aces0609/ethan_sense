@@ -248,3 +248,17 @@ def test_our_own_caveats_survive_the_relabelling():
         for line in src.splitlines():
             if "not yet filed" in line or "has not filed" in line:
                 assert "10-K" not in line, line
+
+
+def test_a_bill_is_not_a_firm_in_the_attribution_check(tmp_path):
+    """ "A draft FY2027 NDAA said 100 B-21s may be insufficient" failed attribution because the cited
+    article spells out the National Defense Authorization Act."""
+    from primer.validate.rules import check_attribution
+
+    store = EvidenceStore(tmp_path / "run", as_of=AS_OF)
+    rec = store.register(
+        "The House Armed Services Committee's National Defense Authorization Act draft says 100 B-21s may be insufficient.",
+        type="news", publisher="Paper", title="t", url="https://news.example.com/a", tier=2,
+    )  # fmt: skip
+    md = f"- **House Armed Services Committee:** a draft FY2027 NDAA said 100 B-21s may be insufficient [{rec.source_id}]."
+    assert check_attribution({3: md}, store)["ok"]

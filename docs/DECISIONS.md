@@ -299,3 +299,28 @@ SpaceX's only peer (technology acronyms are now stop words).
 
 Result (SPCX eval, 2026-10-23): gate passes, judge minimum 3.17 and mean 3.74, 4 sections full and
 10 partial, none unavailable. Before the fallback: 7 unavailable, judge minimum 1.83.
+
+## 2026-10-23: full eval-set, replay and ambiguity check
+
+Full five-company eval-set with the model (Anthropic) and live Firecrawl, SPCX on the public path:
+
+| Entry | Gate | Judge min / mean | Sections full / partial / unavailable |
+|---|---|---|---|
+| LMT | pass | 3.33 / 3.98 | 8 / 6 / 0 |
+| BA | pass | 3.17 / 3.79 | 7 / 7 / 0 |
+| SPCX | pass | 3.17 / 3.73 | 4 / 10 / 0 |
+| NOC | attribution failed, then pass after the fix | 3.33 / 3.90, rerun 3.17 / 3.83 | 7 / 7 / 0 |
+| LHX | pass | 3.00 / 3.79, rerun 3.17 / 3.85 | 7 / 7 / 0 |
+
+Two defects found and fixed: the attribution check treated "a draft FY2027 NDAA said ..." as a firm
+view (legislation acronyms are now exempt), and a replay of an eval entry that was not the first in
+its process missed every robots.txt lookup, because the in-process robots memo answered the later
+entries and never wrote the lookup into their recording. Memo hits and fetch failures are now
+recorded (`DiskCache.record_hit`, `record_failure`). Replay of the second entry in a process, after
+the fix: primer.md, sources.json and claims.json identical, 0 misses, 0 model misses, 0 network
+violations.
+
+Ambiguity: `--company Harris` on a terminal lists the candidates and asks; with no terminal it exits
+with the candidates and the `--ticker` / `--cik` / `--private` remedies; `--cik 0000202058` resolves
+to L3Harris and the run completes. Note: with no `--ticker` the output folder is named from the
+company name (`output/harris/`), not the resolved ticker.

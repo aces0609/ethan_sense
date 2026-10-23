@@ -412,6 +412,28 @@ class DiskCache:
             except OSError:
                 pass
 
+    def record_hit(self, key: str) -> None:
+        """Put an entry the caller answered from its own in-process memo into the current run's
+        recording. A memo outlives a run (an eval set runs five entries in one process), so a
+        later run would otherwise never record what it relied on and could not be replayed."""
+        s = _SESSION
+        if s is None or s.mode != "record":
+            return
+        try:
+            raw = self._path(key).read_text(encoding="utf-8")
+            s.record_body(self.namespace, key, raw, overwrite=False)
+        except OSError:
+            pass
+
+    def record_failure(self, key: str, err_type: str, message: str) -> None:
+        """Record a fetch that failed, so the replay fails the same way instead of missing."""
+        s = _SESSION
+        if s is not None and s.mode == "record":
+            try:
+                s.record_error(self.namespace, key, err_type, message)
+            except OSError:
+                pass
+
     def get_or_fetch(self, key: str, fetch) -> Any:
         s = _SESSION
         if s is not None and s.mode == "replay":

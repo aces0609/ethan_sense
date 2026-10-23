@@ -185,3 +185,33 @@ def test_policy_counts_carry_over_when_a_run_resumes(tmp_path):
     record_policy(log, "https://b.example/y", "allowed")
     assert log.meta["policy"] == {"allowed": 6, "limited": 1, "denied": 0, "robots_blocked": 1}
     assert [b["url"] for b in log.meta["blocked"]] == ["https://a.example/x"]
+
+
+def test_a_later_run_in_the_same_process_records_the_robots_it_reused(tmp_path):
+    """An eval set runs five entries in one process; the robots memo outlives the first, so the
+    others never wrote their robots lookups into their own recording and their replay missed
+    them (Northrop Grumman replay, 2026-10-23)."""
+    from primer.clients import cache
+
+    run1, run2 = tmp_path / "run1", tmp_path / "run2"
+    try:
+        cache.activate(run1, "record")
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(f"{HOST}/robots.txt").mock(return_value=Response(200, text=ROBOTS))
+            mock.get("https://dead.example.com/robots.txt").mock(
+                side_effect=httpx.ReadTimeout("slow")
+            )
+            robots_allowed(f"{HOST}/a")
+            robots_allowed("https://dead.example.com/a")
+            cache.activate(run2, "record")
+            robots_allowed(f"{HOST}/b")  # answered from the memo
+            robots_allowed("https://dead.example.com/b")  # a memoised failure
+        assert len(list((run2 / "replay" / "robots").glob("*.json"))) == 2
+        # the replay finds both, the block and the recorded failure, and misses nothing
+        robots.reset_memo()
+        cache.activate(run2, "replay", log_dir=tmp_path / "log")
+        assert not robots_allowed(f"{HOST}/private/x", offline=True)[0]
+        assert robots_allowed("https://dead.example.com/a", offline=True)[0]
+        assert cache.session().runlog().counters.get("replay_misses", 0) == 0
+    finally:
+        cache.deactivate()

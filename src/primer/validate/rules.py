@@ -88,6 +88,12 @@ NOT_FIRMS = {
     "Aeronautics",
     "Missiles",
     "Rotary",
+    # legislation and rulebooks are documents, not firms: "a draft FY2027 NDAA said ..." cites a
+    # source that spells out "National Defense Authorization Act" (NOC, 2026-10-23)
+    "NDAA",
+    "GAAP",
+    "FAR",
+    "DFARS",
 }
 
 
