@@ -781,3 +781,50 @@ def test_alias_option_reaches_the_inputs_and_the_entity(monkeypatch, tmp_path):
     )
     assert res.exit_code == 0, res.output
     assert seen["inputs"].aliases == ["SpaceX", "Space X"] and seen["inputs"].private
+
+
+def test_one_source_listing_several_rounds_is_not_a_numeric_conflict():
+    """A funding-history article dates every round by its own date, so one page stated $12bn, $127bn
+    and $350bn for the same (metric, period). Sections 11 and 13 then printed a 10-value "Conflict"
+    block (SpaceX private run, 2026-10-21). Two different sources disagreeing still is one."""
+    from primer.validate.numeric import check_numeric
+
+    def claim(section, value, sid, metric="press_valuation"):
+        return {
+            "section": section,
+            "metric": metric,
+            "value": value,
+            "period": "2025-07-31",
+            "source_ids": [sid],
+        }
+
+    one_page = [claim(s, v, "src_0024") for s in (11, 13) for v in (12e9, 127e9, 350e9, 400e9)]
+    assert check_numeric(one_page)["ok"]
+
+    two_pages = [*one_page, claim(13, 410e9, "src_0050")]
+    rep = check_numeric(two_pages)
+    assert not rep["ok"] and len(rep["conflicts"]) == 1
+    vals = {v["value"] for v in rep["conflicts"][0]["values"]}
+    # only comparable figures from different sources clash; the $12bn 2015 round does not
+    assert {410e9, 400e9} <= vals and not ({12e9, 127e9} & vals)
+
+    # a statement metric from one source still conflicts: that is a real inconsistency
+    xbrl = [
+        {**claim(9, 1e9, "src_0001", "revenue"), "period": "FY2025"},
+        {**claim(10, 2e9, "src_0001", "revenue"), "period": "FY2025"},
+    ]
+    assert not check_numeric(xbrl)["ok"]
+
+
+def test_a_conflict_note_lists_each_figure_once():
+    from primer.graph.main import inject_conflicts
+
+    claims = [
+        {"section": s, "metric": "press_valuation", "value": v, "unit": "USD",
+         "period": "2025-07-31", "source_ids": [sid]}
+        for s in (11, 13)
+        for v, sid in ((400e9, "src_0024"), (410e9, "src_0050"))
+    ]  # fmt: skip
+    out = inject_conflicts({11: "x", 13: "y"}, claims)
+    line = next(ln for ln in out[13].splitlines() if ln.startswith("> Conflict"))
+    assert line.count("src_0024") == 1 and line.count("src_0050") == 1

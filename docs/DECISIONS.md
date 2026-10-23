@@ -324,3 +324,14 @@ Ambiguity: `--company Harris` on a terminal lists the candidates and asks; with 
 with the candidates and the `--ticker` / `--cik` / `--private` remedies; `--cik 0000202058` resolves
 to L3Harris and the run completes. Note: with no `--ticker` the output folder is named from the
 company name (`output/harris/`), not the resolved ticker.
+
+## 2026-10-23: private-path "Conflict" blocks from one page listing many rounds
+
+The SpaceX private run printed two Conflict blocks in sections 11 and 13, listing ten valuations
+and six funding amounts "reported as" different values for 2025-07-31. One funding-history
+article states every round, and a sentence with no date of its own takes the article's date, so
+a single source gave many amounts for one (metric, period). The numeric gate read that as
+disagreement. For press and Form D metrics (`press_*`, `form_d_*`) two values now conflict only
+when they come from different sources and are of comparable size (ratio 0.4 to 2.5); a statement
+metric keeps the plain range rule. A conflict note also lists each figure once instead of once
+per section. Checked on the saved SpaceX private runs: two conflicts before, none after.

@@ -462,7 +462,12 @@ def inject_conflicts(sections_md: dict[int, str], claims: list[dict[str, Any]]) 
             continue
         rows = conf["values"]
         bits = []
+        seen_rows: set[tuple[float, tuple[str, ...]]] = set()
         for r in sorted(rows, key=lambda r: r["section"]):
+            ident = (round(float(r["value"]), 6), tuple(r["source_ids"] or ()))
+            if ident in seen_rows:
+                continue  # the same figure from the same source in a later section
+            seen_rows.add(ident)
             cites = "".join(f" [{sid}]" for sid in r["source_ids"]) if r["source_ids"] else ""
             bits.append(
                 f"{_fmt_claim_value(float(r['value']), r.get('unit', 'USD'))}{cites} (section {r['section']})"
