@@ -273,3 +273,11 @@ Node sidecar that compiled the file with `@mdx-js/mdx` is gone, along with the `
 the CI Node steps and the `mdx_compile` gate check. The gate keeps the frontmatter and citation
 checks, and `primer md-check` replaces `primer mdx-check`. Runs made earlier keep their
 `primer.mdx`: `primer_path()` reads either name, so replay and eval-set still work on them.
+
+## 2026-10-23: SpaceX eval entry moved to the public path
+
+SpaceX listed in June 2026 (SPCX, CIK 1181412), so the forced-private run made the judge flag
+contradictions with its own IPO citations (judge minimum 2.83). The entry now runs publicly.
+That run exposed a gap: a newly listed company has no 10-K and no annual XBRL, only an S-1/424B4
+and 10-Qs, so seven sections came out unavailable and section 4 not_applicable (judge minimum
+1.83). The entry fails on purpose until the foundation pack can fall back to the prospectus.

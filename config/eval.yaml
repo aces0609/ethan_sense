@@ -68,22 +68,22 @@ entries:
 
   - name: Space Exploration Technologies Corp
     aliases: [SpaceX]
-    ticker: null
+    ticker: SPCX
     kind: golden
     golden: docs/golden/spacex.md
-    flags:
-      private: true
-    as_of: "2026-10-21"
+    flags: {}
+    as_of: "2026-10-23"
     sector: aerospace_defense
     note: >-
-      Listed after its IPO but exercised as a private company: the point of the entry is the
-      private-company path, where sections 9, 11 and 13 must report partial or unavailable
-      rather than invent financials.
+      Listed in June 2026 (CIK 1181412), so it runs on the public path. It has no 10-K yet
+      (first one due early 2027) and no annual XBRL facts, only an S-1/424B4 prospectus and
+      10-Qs, so sections 2, 3, 5, 8, 9, 11 and 13 come out unavailable and this entry FAILS until
+      the foundation can fall back to the prospectus (known gap, 2026-10-23). The private-company
+      path is covered by the fixture tests in tests/test_private.py, not by this entry.
     expect:
-      is_public: false
-      section9: [partial, unavailable]
-      section11: [partial, unavailable]
-      section13: [partial, unavailable]
+      is_public: true
+      section9: [full, partial]
+      section4: [full, partial]
 
   - name: Northrop Grumman
     ticker: NOC
