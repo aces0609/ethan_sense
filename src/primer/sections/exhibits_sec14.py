@@ -17,6 +17,7 @@ from datetime import date, timedelta
 from primer.sections.common import claim, md_table
 from primer.sections.text_tools import sentences
 from primer.state import Claim
+from primer.validate.exhibits import BOILERPLATE
 
 ITEM_MAP = {
     "1.01": "material definitive agreement",
@@ -106,13 +107,15 @@ def eightk_event(text: str, items: str | None) -> tuple[str, str]:
     sentence = None
     for c in substantive:
         sentence = item_sentence(text, c)
+        if sentence and BOILERPLATE.search(sentence):
+            sentence = None  # cover-page check-box text is not the event
         if sentence:
             break
     if sentence is None:
         sents = [
             s
             for s in sentences(" ".join(text.split()))
-            if len(s) >= 40 and "Item" not in s[:6] and s.upper() != s
+            if len(s) >= 40 and "Item" not in s[:6] and s.upper() != s and not BOILERPLATE.search(s)
         ]
         sentence = sents[0][:240] if sents else "n/a"
     event = "8-K " + ", ".join(f"Item {c}" for c in substantive) + ": " + "; ".join(labels)
@@ -140,7 +143,7 @@ def first_body_sentence(md: str, skip_title: bool = True) -> str:
         keep.append(ln)
     body = " ".join(keep)
     for s in sentences(body):
-        if len(s) >= 60 and len(s.split()) >= 8:
+        if len(s) >= 60 and len(s.split()) >= 8 and not BOILERPLATE.search(s):
             return s[:240]
     return (body[:240] + "…") if body else "n/a"
 

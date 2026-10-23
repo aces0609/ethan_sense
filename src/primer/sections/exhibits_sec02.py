@@ -93,6 +93,12 @@ def find_segment_table(ctx: ToolContext) -> SegmentTable:
             candidates.append((f"Item {item}", text, sid))
     if tenk:
         candidates.append(("10-K", ctx.store.text(tenk[0]), tenk[0]))
+    if not names:
+        # an IPO prospectus names its segments in MD&A or the notes, not in the business item
+        for _where, text, _sid in candidates:
+            names = tt.segment_names_from_text(text)
+            if names:
+                break
     for where, text, sid in candidates:
         if not sid:
             continue

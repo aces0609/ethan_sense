@@ -346,6 +346,26 @@ def _rewrite_coverage(lines: list[str], status: str, extra: list[str]) -> list[s
     return body
 
 
+def _bad_row_lines(ex: Exhibit, probs: list[dict[str, Any]], lines: list[str]) -> set[int] | None:
+    """Line indexes of the failing rows of a table when the table can keep its other rows:
+    every problem names a row, and at least one row has none. None means drop the whole
+    exhibit (a bullet block, a problem with no row, or a table with no clean row left)."""
+    if ex.kind != "table" or any(not isinstance(p.get("row"), int) for p in probs):
+        return None
+    first = next((i for i in range(ex.start, ex.end + 1) if lines[i].startswith("|")), None)
+    if first is None:
+        return None
+    row_lines = [
+        k
+        for k in range(first + 2, ex.end + 1)
+        if not re.fullmatch(r"\|[\s:\-|]+\|", lines[k].strip())
+    ]
+    bad = {p["row"] for p in probs}
+    if not bad or max(bad) >= len(row_lines) or len(bad) >= len(row_lines):
+        return None
+    return {row_lines[r] for r in bad}
+
+
 def apply_exhibit_check(
     markdown: str, coverage: str, *, segments: list[str] | None = None
 ) -> ExhibitCheck:
@@ -365,6 +385,21 @@ def apply_exhibit_check(
         if not probs:
             continue
         reasons = list(dict.fromkeys(p["reason"] for p in probs))
+        bad_lines = _bad_row_lines(ex, probs, lines)
+        if bad_lines is not None:
+            # some rows are fine: drop the bad rows, keep the table
+            dropped.append(
+                {
+                    "exhibit": ex.title,
+                    "kind": "rows",
+                    "rules": sorted({p["rule"] for p in probs}),
+                    "reasons": reasons,
+                    "cells": [p["cell"] for p in probs][:6],
+                    "rows_dropped": len(bad_lines),
+                }
+            )
+            drop.update(bad_lines)
+            continue
         dropped.append(
             {
                 "exhibit": ex.title,
@@ -383,7 +418,12 @@ def apply_exhibit_check(
             continue
         out.append(ln)
     extra = [
-        f"exhibit '{d['exhibit']}' dropped by the exhibit validator: {'; '.join(d['reasons'][:3])}"
+        (
+            f"exhibit '{d['exhibit']}': {d['rows_dropped']} row{'s' if d['rows_dropped'] != 1 else ''} "
+            f"dropped by the exhibit validator: {'; '.join(d['reasons'][:3])}"
+            if d["kind"] == "rows"
+            else f"exhibit '{d['exhibit']}' dropped by the exhibit validator: {'; '.join(d['reasons'][:3])}"
+        )
         for d in dropped
     ]
     status = coverage if coverage in ("unavailable", "not_applicable") else "partial"

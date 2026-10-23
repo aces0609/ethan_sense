@@ -111,6 +111,52 @@ def _register_8k(
     return rec.source_id
 
 
+DEAL_ITEMS = ("1.01", "2.01")  # entry into a material agreement; completion of an acquisition
+
+
+def _deal_8ks_from_index(ctx: ToolContext, out: dict[str, Any]) -> None:
+    """EDGAR full-text search is refused for this client (403) or returns nothing, so the deal
+    8-Ks are picked from the filing index instead: Item 1.01 or 2.01 filings of the last five
+    years, newest first. The documents are read exactly as search hits would be."""
+    since = ctx.as_of - timedelta(days=365 * FULLTEXT_YEARS)
+    try:
+        refs = ctx.edgar.filings(ctx.entity.cik, forms=["8-K"], since=since)
+    except Exception as e:  # noqa: BLE001 - the section falls back to notes and press
+        ctx.log(f"8-K index failed: {e!r}")
+        return
+    deals = [
+        r
+        for r in refs
+        if r.filing_date <= ctx.as_of
+        and r.primary_document
+        and any(c in (r.items or "").split(",") for c in DEAL_ITEMS)
+    ]
+    deals.sort(key=lambda r: r.filing_date, reverse=True)
+    for r in deals[:FULLTEXT_HITS]:
+        src = {
+            "file_date": r.filing_date.isoformat(),
+            "file_description": f"Item {r.items}",
+        }
+        try:
+            sid = _register_8k(ctx, r.accession, r.primary_document, src)
+        except Exception as e:  # noqa: BLE001
+            ctx.log(f"8-K {r.accession} fetch failed: {e!r}")
+            continue
+        if sid:
+            out["filings"].append(
+                {
+                    "sid": sid,
+                    "kind": "8-K",
+                    "date": r.filing_date.isoformat(),
+                    "accession": r.accession,
+                }
+            )
+    if out["filings"]:
+        out["notes"].append(
+            "8-Ks were chosen by item code (1.01, 2.01) from the filing index, not by text search"
+        )
+
+
 def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any]:
     out: dict[str, Any] = {"filings": [], "pages": [], "agent": None, "notes": []}
     ft = next((i for i in plan_items if i.get("tool") == "edgar.fulltext_search"), None)
@@ -150,6 +196,8 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
                         "accession": accession,
                     }
                 )
+    if not out["filings"] and ctx.entity.cik:
+        _deal_8ks_from_index(ctx, out)
     # foundation notes: 10-K acquisitions note, 10-Q business-combinations note
     item8, sid8 = ctx.item_text("8")
     if not sid8:

@@ -59,14 +59,39 @@ def slugify(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "company"
 
 
+def _sec_match_quiet(inputs: Inputs) -> dict[str, Any] | None:
+    """The SEC ticker-file row for a run given no ticker: the CIK's row, or the single clear
+    name match. None when the name is ambiguous (the entity prompt decides later), unlisted,
+    or the lookup fails for any reason: the folder name is a convenience, never a failure."""
+    from primer.graph import entity as ent_mod
+
+    try:
+        edgar = EdgarClient(offline=inputs.offline)
+        if inputs.cik:
+            return ent_mod.lookup_cik(edgar, inputs.cik)
+        hits = ent_mod.name_hits(edgar, inputs.company_name)
+        return hits[0] if hits and not ent_mod.needs_choice(hits) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def folder_slug(inputs: Inputs, resolve=_sec_match_quiet) -> str:
+    """The output folder of a run: the ticker when given, else the ticker the SEC file lists for
+    the company (a run started with a name or a CIK used to land in output/harris/ although it
+    resolved to LHX), else the company-name slug (a private company, or an ambiguous name that
+    the entity prompt settles after the folder exists)."""
+    if inputs.ticker:
+        return inputs.ticker.upper()
+    if not inputs.private:
+        match = resolve(inputs) or {}
+        if match.get("ticker"):
+            return str(match["ticker"]).upper()
+    return slugify(inputs.company_name)
+
+
 def new_run(inputs: Inputs) -> tuple[str, Path]:
     run_id = f"{inputs.as_of_date.isoformat()}-{uuid.uuid4().hex[:8]}"
-    slug = (
-        (inputs.ticker or slugify(inputs.company_name)).upper()
-        if inputs.ticker
-        else slugify(inputs.company_name)
-    )
-    run_dir = output_root() / slug / run_id
+    run_dir = output_root() / folder_slug(inputs) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_id, run_dir
 

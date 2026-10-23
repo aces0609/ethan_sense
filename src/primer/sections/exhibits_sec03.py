@@ -147,6 +147,91 @@ def _status(paragraph: str, product: str) -> str:
     return "described in 10-K"
 
 
+SOLUTIONS_HEADING = re.compile(
+    r"(?mi)^(?:our\s+)?(?:solutions\s*(?:&|and)\s*services|products\s*(?:&|and)\s*services|"
+    r"products|solutions|services|our\s+offerings)\s*$"
+)
+SECTION_END = re.compile(
+    r"(?mi)^(?:customers?|our customers|sales and marketing|competition|intellectual property|"
+    r"human capital|our employees|government regulation|regulation|facilities|properties|"
+    r"manufacturing|legal proceedings)\s*$"
+)
+# picture captions and sub-headings are not products
+NOT_A_PRODUCT = re.compile(
+    r"(map of|visuali[sz]ation|landing|orbiting|in orbit|photo|image|figure|capabilit|"
+    r"artist|illustration|collaboration with|why |our |how we|key |industry|market)",
+    re.I,
+)
+
+
+def heading_products(item1: str, segments: list[str], k_sid: str) -> list[ProductRow]:
+    """Products read from the headings of a "Solutions & Services" section.
+
+    An IPO prospectus describes each offering under its own heading (Falcon 9, Falcon Heavy,
+    Starship, Dragon, Starlink Consumer Broadband, Grok), grouped under the segment names, so the
+    headings are the product list. A heading that is a segment name opens that segment's group
+    (the first group belongs to the first segment); captions and sub-headings are skipped. Each
+    row's status and key metric come from the text under its heading."""
+    m = SOLUTIONS_HEADING.search(item1)
+    if not m:
+        return []
+    region = item1[m.end() :]
+    end = SECTION_END.search(region)
+    if end:
+        region = region[: end.start()]
+    seg_by_lower = {sg.lower(): sg for sg in segments}
+    cur = segments[0] if segments else "n/a"
+    blocks: list[tuple[str, str, list[str]]] = []  # (segment, heading, body lines)
+    for ln in region.split(chr(10)):
+        s = ln.strip()
+        is_heading = (
+            2 <= len(s) <= 60
+            and s[:1].isupper()
+            and not s.endswith((".", ",", ":", ";"))
+            and not s.startswith(("|", "•"))
+            and len(s.split()) <= 8
+        )
+        if is_heading and s.lower() in seg_by_lower:
+            cur = seg_by_lower[s.lower()]
+            continue
+        s = re.sub(r"\s+Overview$", "", s)  # "Starship Overview" is the Starship block
+        if (
+            is_heading
+            and len(s) >= 3
+            and not NOT_A_PRODUCT.search(s)
+            and not re.search(r"[a-z]{3,} [a-z]{3,} [a-z]{3,}", s)
+        ):
+            blocks.append((cur, s, []))
+        elif blocks and s:
+            blocks[-1][2].append(s)
+    rows: list[ProductRow] = []
+    seen: set[str] = set()
+    for seg, name, body in blocks:
+        text = " ".join(body)
+        if len(text) < 120 or name.lower() in seen:
+            continue  # a heading with no description under it is a divider
+        seen.add(name.lower())
+        metric, val, msid = _metric(name, [(text, k_sid)])
+        rows.append(
+            ProductRow(
+                seg,
+                name,
+                _status(text, name) if text else "described in 10-K",
+                metric,
+                val,
+                [k_sid],
+            )
+        )
+    # at most six per segment, so a long first segment cannot crowd out the others
+    per_seg: dict[str, int] = {}
+    kept: list[ProductRow] = []
+    for r in rows:
+        per_seg[r.segment] = per_seg.get(r.segment, 0) + 1
+        if per_seg[r.segment] <= 6:
+            kept.append(r)
+    return kept
+
+
 def _keys(product: str) -> list[str]:
     """Strings that identify the product in a sentence: the full name, then the designation
     (a first token with a digit or all caps, e.g. F-35, THAAD), else the first two words."""
@@ -185,6 +270,7 @@ def product_table(
     remarks: tuple[str, str | None] = ("", None),
     fy_label: str = "",
     section: int = 3,
+    prefer_headings: bool = False,
 ) -> ProductExhibit:
     if not item1 or not k_sid:
         return ProductExhibit("", [], [], False, ["no 10-K Item 1 text"])
@@ -202,11 +288,21 @@ def product_table(
             metric, val, msid = _metric(prod, [(p, k_sid), release, remarks])
             sids = [k_sid] + ([msid] if msid and msid != k_sid else [])
             rows.append(ProductRow(seg, prod, _status(p, prod), metric, val, sids))
+    from_headings = False
+    if prefer_headings:
+        # a prospectus lists its offerings as headings under "Our Solutions & Services"; the
+        # sentence lists the paragraph readers find there are customers and partners, not products
+        by_heading = heading_products(item1, segments, k_sid)
+        if len(by_heading) >= 3:
+            rows, from_headings = by_heading, True
+            seen = {r.product.lower() for r in rows}
     # designations named in Item 1 outside the segment paragraphs
     for d in tt.program_designations(item1):
         if d.lower() in seen or any(d in r.product for r in rows):
             continue
         seg = next((s for s, p in paras.items() if d in p), "n/a")
+        if from_headings and seg == "n/a":
+            continue  # a launch-pad code is not an offering of any segment
         para = paras.get(seg, "")
         metric, val, msid = _metric(d, [(para, k_sid), release, remarks])
         sids = [k_sid] + ([msid] if msid and msid != k_sid else [])

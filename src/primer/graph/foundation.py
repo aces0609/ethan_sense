@@ -461,7 +461,9 @@ def _filings(edgar, store, ent, as_of, found, runlog) -> None:
         }
         item1 = next((c.text for c in chunk_by_item(text) if c.item == "1"), text[:200000])
         try:
-            cands = competitor_candidates(item1, ent.name)
+            cands = competitor_candidates(
+                item1, ent.name, heading_first=bool(found.get("annual_basis"))
+            )
             found["peers"] = resolve_peers(edgar, cands, ent.cik)
             found["peers"] += unresolved_peers(cands, found["peers"])
         except Exception as e:

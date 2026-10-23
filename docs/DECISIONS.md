@@ -335,3 +335,24 @@ disagreement. For press and Form D metrics (`press_*`, `form_d_*`) two values no
 when they come from different sources and are of comparable size (ratio 0.4 to 2.5); a statement
 metric keeps the plain range rule. A conflict note also lists each figure once instead of once
 per section. Checked on the saved SpaceX private runs: two conflicts before, none after.
+
+## 2026-10-23: required tables, peers, press mislabels, output folder
+
+Cause and fix for each item the SPCX judge scored lowest. Result of the SPCX eval after the fixes
+(public path, live): gate passes, judge minimum 3.33 and mean 3.82, 8 sections full and 6 partial
+(before: minimum 3.17, 4 full), tables present in sections 2, 3, 5, 7 and 14.
+
+| Problem | Cause | Fix |
+|---|---|---|
+| Section 2 had no segment table | The prospectus lays tables out one cell per line with dot leaders, and the segment table mixes segment rows with their sub-lines; the segment names sit in MD&A, not the business item | `rejoin_leader_tables` rebuilds the rows; `labelled_segment_table` takes the rows named like a segment when they sum to the total; names are read from MD&A or the notes when the business item has none |
+| Every paragraph reader saw one-line fragments | The prospectus keeps every printed line as a paragraph and prints page numbers between pages | `reflow_hard_wrapped`, applied only when the text is detected as hard-wrapped, after the page marks are removed and before the tables are rebuilt |
+| Section 3 table dropped | Segments were n/a for launch-pad codes; the list-based reader found customers, not products | Prospectus runs read the headings of "Our Solutions & Services" as products grouped under Space, Connectivity and AI (opt-in via the foundation's annual_basis; a 10-K keeps its list reader) |
+| Section 5 had no peers | The competition text sits under a Competition heading; marketing paragraphs that say "competitive" came first | `heading_first` reads that section for prospectus runs; sentence words and technology acronyms are stop words |
+| Section 14 lost its whole table to one cell | The validator dropped an exhibit for any bad cell; an 8-K cover-page sentence reached the implication column | The validator drops only the failing rows when a row survives; cover-page boilerplate is never chosen as the event sentence |
+| Section 7 never read an 8-K | EDGAR full-text search is refused (403) in every run | Deal 8-Ks (Items 1.01 and 2.01, five years) are picked from the filing index; a merger-agreement sentence becomes a deal row with its share consideration and no invented dollar value; the announce date is the earliest filing |
+| Press figures mislabelled on the private path | The classifier took the nearest trigger word | Per-employee, per-share and per-month amounts are not classified; a buyback is not a valuation; IPO proceeds are funding raised; the same guards apply to model-proposed datapoints, and the drafter is told never to compare per-unit figures with totals |
+| Folder named after the company, not the ticker | The folder was chosen before the entity was resolved | `folder_slug` looks the ticker up in the SEC file when only a name or CIK is given; private runs and ambiguous names keep the name slug |
+
+Known and not fixed: section 13 on the private path still pairs figures that share a fallback page
+date in one row (a $100 million seed round beside a $127 billion valuation); the private drafter can
+still write a "Conflict" note about a per-unit figure despite the new rule.

@@ -265,6 +265,28 @@ def money_tokens(sentence: str) -> list[tuple[float, int, int]]:
     return out
 
 
+# Figures that look like a revenue, valuation or funding amount and are not one (SpaceX private
+# run, 2026-10-23): revenue PER EMPLOYEE read as revenue, a share buyback read as a valuation, and
+# IPO proceeds read as a valuation.
+PER_UNIT = re.compile(
+    r"per[ -](?:employee|share|user|subscriber|customer|unit|head|seat|month|launch)"
+    r"|average revenue per|\bARPU\b|a month\b|a share\b",
+    re.I,
+)
+BUYBACK = re.compile(r"buy-?backs?|repurchases?|bought back|buys? back", re.I)
+PROCEEDS = re.compile(
+    r"(?:IPO |offering |net )?proceeds|IPO (?:raise|size)|raised in (?:its|the) IPO", re.I
+)
+
+
+def _near(
+    rx: re.Pattern[str], sentence: str, start: int, end: int, before: int, after: int
+) -> bool:
+    return bool(rx.search(sentence[max(0, start - before) : start])) or bool(
+        rx.search(sentence[end : end + after])
+    )
+
+
 def classify_money(sentence: str, start: int, end: int) -> str | None:
     """The kind of figure a dollar amount is, by the nearest trigger phrase (a trigger before
     the amount beats one after it by six characters)."""
@@ -282,6 +304,12 @@ def classify_money(sentence: str, start: int, end: int) -> str | None:
     if best is None:
         return None
     kind = best[2]
+    if _near(PER_UNIT, sentence, start, end, 25, 15):
+        return None  # a per-employee, per-share or per-month figure is not a company total
+    if _near(BUYBACK, sentence, start, end, 40, 40):
+        return None  # a share buyback is neither a valuation nor a round
+    if _near(PROCEEDS, sentence, start, end, 30, 30):
+        return "funding"  # IPO proceeds are capital raised, whatever else the sentence says
     if kind == "funding" and DEBT_AFTER.match(sentence[end : end + 30]):
         return "debt"
     return kind
@@ -549,10 +577,16 @@ def verify_model_item(item: _ModelItem, page_text: str, names: list[str], kinds:
             abs(float(m.group(1).replace(",", "")) - item.value_usd) <= 0.5
             for m in HEADCOUNT_RX.finditer(quote)
         )
-    return any(
-        abs(v - abs(item.value_usd)) <= 0.005 * abs(item.value_usd)
-        for v, _, _ in money_tokens(quote)
-    )
+    for v, s, e in money_tokens(quote):
+        if abs(v - abs(item.value_usd)) > 0.005 * abs(item.value_usd):
+            continue
+        # the model makes the same mistakes the regex pass guards against
+        if _near(PER_UNIT, quote, s, e, 25, 15) or _near(BUYBACK, quote, s, e, 40, 40):
+            return False
+        if item.kind == "valuation" and _near(PROCEEDS, quote, s, e, 30, 30):
+            return False
+        return True
+    return False
 
 
 def model_datapoints(
@@ -1414,7 +1448,9 @@ PRIVATE_RULES = (
     "in the structured facts, each with its period or date and its source id, and call them "
     "press-reported and unaudited. Do not compute growth rates, margins, multiples, net debt "
     "or implied values, do not estimate anything missing, and do not state a price target or "
-    "consensus. Say plainly what could not be found."
+    "consensus. Never present a per-employee, per-share or per-user figure as a company total, "
+    "and never call a difference between such a figure and a total a conflict. Say plainly what "
+    "could not be found."
 )
 
 

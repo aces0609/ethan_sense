@@ -85,6 +85,7 @@ class Deal:
     sentence: str
     source_id: str
     source_kind: str  # 8-K | 10-K | 10-Q | press | news | agent
+    consideration: str = ""  # non-cash terms when no dollar value is stated ("389,289,254 shares")
 
 
 @dataclass
@@ -99,6 +100,8 @@ class DealRow:
     values: list[tuple[float, str, str]] = field(default_factory=list)  # (usd, sid, kind)
     source_ids: list[str] = field(default_factory=list)
     kinds: list[str] = field(default_factory=list)
+    consideration: str = ""
+    consideration_sid: str = ""  # the source that states it
 
 
 @dataclass
@@ -142,6 +145,62 @@ def _clean_target(name: str) -> str:
     return name
 
 
+# A merger 8-K names the target with its short name and states the price in shares, never in dollars:
+# "... and Anysphere, Inc. (\u201cCursor\u201d) entered into an Agreement and Plan of Merger".
+MERGER_RE = re.compile(
+    r"and (?P<target>[A-Z][A-Za-z0-9&.,\- ]{2,50}?(?:,? (?:Inc|Corp|Corporation|LLC|Ltd|Limited|"
+    r"Holdings|plc|AG|N\.V))\.?)\s*(?:\(|\uff08)[\u201c\"][^\u201d\")]{2,40}[\u201d\"]\)?"
+    r"\s*(?:,\s*)?(?:each )?entered into an? (?:Amended and Restated )?(?:Agreement and Plan of Merger|"
+    r"merger agreement|Merger Agreement)",
+)
+SHARES_RE = re.compile(r"(?:an )?aggregate of (?P<n>[\d,]{5,}) shares", re.I)
+
+
+def merger_deals(
+    flat: str, source_id: str, source_kind: str, fallback_date: date | None
+) -> list[Deal]:
+    """Deals from an 8-K's merger-agreement sentence; the value stays unstated (shares are not
+    dollars) and the share consideration, when the filing counts it, goes in its own field."""
+    out: list[Deal] = []
+    for m in MERGER_RE.finditer(flat):
+        target = _clean_target(m.group("target"))
+        if not target or norm_company(target) in GENERIC_TARGETS or len(target) < 3:
+            continue
+        sentence, _start, nxt = _sentence_at(flat, m.start(), m.end())
+        done = bool(
+            re.search(
+                r"Item 2\.01|\bbecame effective\b|\b(?:has|have|was|were) (?:completed|consummated)\b"
+                r"|\bcompleted the (?:merger|acquisition)\b",
+                flat,
+                re.I,
+            )
+        )
+        fd = FULL_DATE_RE.search(sentence)
+        if fd and _iso_from_match(fd):
+            dt, basis = _iso_from_match(fd) or "n.d.", "sentence"
+        elif fallback_date:
+            dt, basis = fallback_date.isoformat(), "filing date"
+        else:
+            dt, basis = "n.d.", "none"
+        sh = SHARES_RE.search(flat)
+        out.append(
+            Deal(
+                target=target,
+                value_usd=0.0,
+                status="completed" if done else "announced",
+                date=dt,
+                date_basis=basis,
+                segment="n/a",
+                rationale="n/a",
+                sentence=sentence[:400],
+                source_id=source_id,
+                source_kind=source_kind,
+                consideration=f"{sh.group('n')} shares" if sh else "",
+            )
+        )
+    return out
+
+
 def extract_deals(
     text: str, source_id: str, source_kind: str, fallback_date: date | None, limit: int = 12
 ) -> list[Deal]:
@@ -149,6 +208,8 @@ def extract_deals(
     flat = " ".join(text.split())
     out: list[Deal] = []
     seen: set[tuple[str, float]] = set()
+    if source_kind == "8-K":
+        out.extend(merger_deals(flat, source_id, source_kind, fallback_date))
     for rx, kind in ((ACQ_RE, "acq"), (PAID_RE, "acq"), (DIV_RE, "div")):
         for m in rx.finditer(flat):
             if rx is PAID_RE:
@@ -249,13 +310,23 @@ def merge_deals(deals: list[Deal]) -> list[DealRow]:
             # a more specific date or a non-empty segment/rationale fills a gap
             if r.date_basis != "sentence" and d.date_basis == "sentence":
                 r.date, r.date_basis = d.date, d.date_basis
+            elif (
+                r.date_basis == d.date_basis
+                and len(r.date) == len(d.date) == 10
+                and d.date < r.date
+            ):
+                r.date = d.date  # the column is the announce date: the earliest filing says it
             if r.segment == "n/a" and d.segment != "n/a":
                 r.segment = d.segment
             if r.rationale == "n/a" and d.rationale != "n/a":
                 r.rationale = d.rationale
             if r.status == "announced" and d.status == "completed":
                 r.status = "completed"
-        if not any(abs(v - d.value_usd) <= 0.005 * max(v, d.value_usd) for v, _, _ in r.values):
+        if d.consideration and not r.consideration:
+            r.consideration, r.consideration_sid = d.consideration, d.source_id
+        if d.value_usd > 0 and not any(
+            abs(v - d.value_usd) <= 0.005 * max(v, d.value_usd) for v, _, _ in r.values
+        ):
             r.values.append((d.value_usd, d.source_id, d.source_kind))
         if d.source_id not in r.source_ids:
             r.source_ids.append(d.source_id)
@@ -304,6 +375,17 @@ def acquisition_table(deals: list[Deal], section: int = 7) -> AcquisitionExhibit
             )
             if c:
                 claims.append(c)
+        if not value_cells:
+            first = r.consideration_sid or r.source_ids[0]
+            value_cells.append(
+                f"n/a (consideration: {r.consideration}) [{first}]"
+                if r.consideration
+                else f"n/a [{first}]"
+            )
+        elif r.consideration:
+            value_cells.append(
+                f"consideration: {r.consideration} [{r.consideration_sid or r.source_ids[0]}]"
+            )
         if len(r.values) > 1:
             notes.append(f"{r.target}: sources differ on the value (both kept)")
         src_cell = "; ".join(f"{k} [{s}]" for s, k in zip(r.source_ids, r.kinds, strict=False))

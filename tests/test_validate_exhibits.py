@@ -29,6 +29,12 @@ PRODUCTS = (
     "> Coverage: full — brief satisfied."
 )
 
+# the same draft with only the failing row: no clean row is left to keep
+PRODUCTS_ALL_BAD = PRODUCTS.replace(
+    "| Aeronautics [src_0001] | F-16 [src_0001] | described in 10-K [src_0001] | n/a | [src_0001] |\n",
+    "",
+)
+
 
 def _rules(md: str, **kw) -> set[str]:
     return {p["rule"] for p in check_exhibits(md, **kw)}
@@ -134,9 +140,26 @@ def test_transcript_timestamps_and_page_chrome_anywhere_in_a_table():
     assert [p["row"] for p in probs] == [0, 1]
 
 
-def test_failing_exhibit_is_dropped_prose_kept_coverage_partial():
+def test_a_failing_row_is_dropped_and_the_rest_of_the_table_is_kept():
+    """One bad cell used to take the whole table with it (SpaceX's event log lost every row to
+    one 8-K cover-page cell). Only the failing rows go; the table stays when a row survives."""
     md = PRODUCTS.format(product="F-35", metric="n/a")
     chk = apply_exhibit_check(md, "full")
+    assert not chk.ok and chk.tables_left == 1
+    assert chk.dropped[0]["kind"] == "rows" and chk.dropped[0]["rows_dropped"] == 1
+    out = chk.markdown
+    assert "| n/a | F-35 |" not in out and "| Aeronautics [src_0001] | F-16" in out
+    assert "Aeronautics builds the F-35 and the C-130 [src_0001]" in out  # prose kept
+    assert out.endswith(
+        "> Coverage: partial — exhibit 'Products and programs by segment (10-K Item 1)': 1 row "
+        "dropped by the exhibit validator: segment is n/a for F-35 while the text places it in Aeronautics."
+    )
+    assert not check_exhibits(out)  # what is left passes the gate's second look
+
+
+def test_failing_exhibit_is_dropped_prose_kept_coverage_partial():
+    md = PRODUCTS_ALL_BAD.format(product="F-35", metric="n/a")
+    chk = apply_exhibit_check(md, "full", segments=["Aeronautics"])
     assert not chk.ok and chk.tables_left == 0
     assert chk.dropped[0]["exhibit"] == "Products and programs by segment (10-K Item 1)"
     out = chk.markdown
@@ -151,10 +174,15 @@ def test_failing_exhibit_is_dropped_prose_kept_coverage_partial():
     assert apply_exhibit_check(clean, "full").markdown == clean
     # a draft without a coverage line gets one; an unavailable section keeps its status
     no_cov = md.rsplit("\n\n> Coverage", 1)[0]
-    assert "> Coverage: partial — exhibit" in apply_exhibit_check(no_cov, "full").markdown
+    assert (
+        "> Coverage: partial — exhibit"
+        in apply_exhibit_check(no_cov, "full", segments=["Aeronautics"]).markdown
+    )
     assert (
         "> Coverage: unavailable"
-        in apply_exhibit_check(no_cov + "\n\n> Coverage: unavailable — x.", "unavailable").markdown
+        in apply_exhibit_check(
+            no_cov + "\n\n> Coverage: unavailable — x.", "unavailable", segments=["Aeronautics"]
+        ).markdown
     )
 
 
@@ -174,12 +202,12 @@ def test_critic_wiring_drops_exhibit_and_marks_partial(tmp_path):
     draft = SectionDraft(
         section=3,
         title="Products, Services and Technology",
-        markdown=PRODUCTS.format(product="F-35", metric="n/a"),
+        markdown=PRODUCTS_ALL_BAD.format(product="F-35", metric="n/a"),
         coverage="full",
         exhibit_present=True,
     )
     runlog = RunLog(tmp_path)
-    out = validate_exhibits(draft, [], runlog)
+    out = validate_exhibits(draft, ["Aeronautics"], runlog)
     assert out.coverage == "partial" and out.exhibit_present is False
     assert "| Segment |" not in out.markdown
     assert any(n.startswith("exhibit 'Products and programs by segment") for n in out.critic_notes)

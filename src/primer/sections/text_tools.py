@@ -35,8 +35,30 @@ TECH_ACRONYMS = {
     "ai",
 }
 
+# Capitalised sentence openers and section words that sit in a competition passage and matched an
+# SEC registrant ("Emerging" became EMERGING HOLDINGS INC as a SpaceX peer).
+SENTENCE_WORDS = {
+    "emerging",
+    "participants",
+    "key",
+    "competition",
+    "enterprise",
+    "terrestrial",
+    "consumer",
+    "satellite",
+    "while",
+    "however",
+    "similarly",
+    "together",
+    "furthermore",
+    "since",
+    "launch",
+    "earth",
+}
+
 STOP = {
     *TECH_ACRONYMS,
+    *SENTENCE_WORDS,
     "the",
     "and",
     "our",
@@ -197,15 +219,81 @@ def segment_table(text: str, segment_names: list[str] | None = None) -> SummingT
             if hits < max(1, len(segment_names) // 2):
                 continue
         return t
+    if segment_names:
+        return labelled_segment_table(text, segment_names)
+    return None
+
+
+FOOTNOTE_MARK = re.compile(r"\s*\(\d+\)\s*$")
+
+
+def labelled_segment_table(text: str, segment_names: list[str]) -> SummingTable | None:
+    """A revenue table that mixes segment rows with their sub-lines (Space 4,086 under Launch
+    Services and Launch & Development; Connectivity under Consumer and Enterprise), so no run of
+    consecutive rows sums to the total. The rows whose label IS a segment name are taken, and
+    the table counts only when they sum to the 'Total ... revenue' row in every column."""
+    wanted = {FOOTNOTE_MARK.sub("", n).strip().lower() for n in segment_names}
+    if len(wanted) < 2:
+        return None
+    total_rx = re.compile(r"^\s*total\b.*(sales|revenue)", re.I)
+    lines = text.splitlines()
+    run: list[TableRow] = []
+    last_years: list[str] = []
+    for i, line in enumerate(lines):
+        years = YEAR.findall(line)
+        row = _row(line, i)
+        header_like = row is not None and all(1990 <= v <= 2100 for v in row.values)
+        if len(years) >= 2 and (row is None or header_like):
+            last_years = years[:6]
+        if header_like:
+            continue
+        if row is None:
+            if line.strip() and "|" not in line and run:
+                run = []  # prose ends a table
+            continue
+        if total_rx.search(row.label) and run:
+            ncol = len(row.values)
+            seg = [
+                r
+                for r in run
+                if len(r.values) == ncol
+                and FOOTNOTE_MARK.sub("", r.label).strip().lower() in wanted
+            ]
+            labels = {FOOTNOTE_MARK.sub("", r.label).strip().lower() for r in seg}
+            if len(seg) >= 2 and len(labels) == len(seg) and len(labels) >= len(wanted) - 1:
+                if all(
+                    abs(sum(r.values[c] for r in seg) - row.values[c])
+                    <= max(abs(row.values[c]) * 0.02, 1.0)
+                    for c in range(ncol)
+                ):
+                    return SummingTable(
+                        rows=seg,
+                        total=row,
+                        columns=last_years[:ncol],
+                        start_line=seg[0].line_no,
+                        end_line=row.line_no,
+                    )
+            run = []
+            continue
+        run.append(row)
     return None
 
 
 def segment_names_from_text(text: str) -> list[str]:
     """Segment names from phrases like 'four business segments: A, B, C and D'."""
+    text = re.sub(r"\s+", " ", text)  # a prospectus wraps every line, mid-sentence
     m = re.search(
         r"(?:business|reportable|operating) segments?\s*[:\-–—]?\s*([A-Z][^.\n]{10,300}?)\.",
         text,
     )
+    if not m:
+        # "three reportable segments in our vertically integrated innovation engine: Space,
+        # Connectivity, and AI": a few words between "segments" and the colon
+        m = re.search(
+            r"(?:business|reportable|operating) segments?(?: [a-z][a-z\-]*){1,10}:\s*"
+            r"([A-Z][^.\n]{2,300}?)\.",
+            text,
+        )
     if not m:
         return []
     raw = re.split(r",\s*|\s+and\s+|;\s*", m.group(1))
@@ -584,9 +672,24 @@ def norm_company(name: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def competitor_candidates(text: str, self_name: str, limit: int = 40) -> list[str]:
-    """Capitalized 1-3 word names near 'compet' in Item 1, excluding the company itself."""
-    paras = paragraphs_with(text, ["compet"], window=0, max_paragraphs=8)
+COMPETITION_HEADING = re.compile(r"(?mi)^(?:#+\s*)?(?:\*\*)?(?:Our\s+)?Competition(?:\*\*)?\s*$")
+
+
+def competitor_candidates(
+    text: str, self_name: str, limit: int = 40, heading_first: bool = False
+) -> list[str]:
+    """Capitalized 1-3 word names near 'compet' in Item 1, excluding the company itself.
+
+    With `heading_first` (an IPO prospectus, whose marketing text says "competitive advantage"
+    in a dozen paragraphs before the real discussion) the section under a "Competition" heading
+    is read instead of the paragraphs that mention the word."""
+    paras: list[str] = []
+    if heading_first:
+        m = COMPETITION_HEADING.search(text)
+        if m:
+            paras = [text[m.end() : m.end() + 7000]]
+    if not paras:
+        paras = paragraphs_with(text, ["compet"], window=0, max_paragraphs=8)
     me = norm_company(self_name).split()
     cands: dict[str, int] = {}
     for p in paras:

@@ -121,6 +121,7 @@ def draft(
         remarks=(remarks, tr_sid),
         fy_label=f"FY{ctx.fy}",
         section=SECTION,
+        prefer_headings=bool(ctx.foundation.get("annual_basis")),
     )
     notes = list(tool_results.get("notes") or []) + list(ex.notes)
     web = [w for w in tool_results.get("web") or [] if w.get("source_id")]
