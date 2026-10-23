@@ -11,7 +11,7 @@ Company Primer Agent: give it a company name (and ticker, if public) and it writ
 
 ## Install
 
-Requires Python 3.12+, [uv](https://docs.astral.sh/uv/) and Node 18+ (for the MDX compile check only).
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --all-groups
@@ -76,7 +76,7 @@ uv run primer info
 uv run pytest -q
 ```
 
-Tests run offline against recorded EDGAR and USAspending fixtures and hand-written Firecrawl pages (`tests/conftest.py`); regenerate the recorded ones with `uv run python tests/fixtures/make_fixtures.py`. CI runs ruff, the test suite and the Node sidecar on every push.
+Tests run offline against recorded EDGAR and USAspending fixtures and hand-written Firecrawl pages (`tests/conftest.py`); regenerate the recorded ones with `uv run python tests/fixtures/make_fixtures.py`. CI runs ruff and the test suite on every push.
 
 ## Layout
 
@@ -91,6 +91,5 @@ src/primer/
   render/        mdx, citations
   validate/      citations, numeric, tier, attribution, recency, coverage, page budget, takeaways, mdx compile
   eval/          scorecard: judge rubric, fact overlap, citation resolvability, golden financials
-tools/           mdx-check.mjs Node sidecar
 tests/           pytest suite with recorded fixtures and Firecrawl page mocks
 ```
