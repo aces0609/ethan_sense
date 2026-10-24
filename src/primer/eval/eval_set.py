@@ -185,7 +185,7 @@ def resolve_reference(rel: str | None) -> Path | None:
 
 def parse_sections(s: str | None) -> list[int]:
     if not s:
-        return list(range(1, 15))
+        return list(range(1, 16))
     out: set[int] = set()
     for part in str(s).split(","):
         part = part.strip()
@@ -194,7 +194,7 @@ def parse_sections(s: str | None) -> list[int]:
             out.update(range(int(a), int(b) + 1))
         elif part:
             out.add(int(part))
-    return sorted(x for x in out if 1 <= x <= 14)
+    return sorted(x for x in out if 1 <= x <= 15)
 
 
 def default_runner(entry: EvalEntry) -> Path:

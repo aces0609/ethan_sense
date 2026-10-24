@@ -397,3 +397,25 @@ an empty bull/bear table. Anduril is in config/eval.yaml (private: true).
 Not fixed: section 8 names one executive (the pages fetched name no others; anduril.com blocks scraping);
 the press tables still date some rows by the page date and can mislabel a figure when an aggregator lays
 amounts out in a table; section 13 repeats a funding round that two sources date a day apart.
+
+## 2026-10-24: section 15, Federal Contract Awards by Agency
+
+Added as a new section 15; section 14 (Recent Developments) is unchanged. The request read "section 14",
+which is taken. If a replacement was meant, the numbering is one edit in `state.py`.
+
+- **Content.** Net obligations by awarding agency for the last 12 months, 3 and 5 years (rolling, by date
+  signed), then the largest contracts for the top agencies. DoD is split by service ("DoD – Navy",
+  "DoD – Air Force"); a sub-tier equal to its department collapses to it ("DOE").
+- **Source.** SAM.gov Contract Awards API, one record per contract action; the section sums
+  `actionObligation` per action in the window, so de-obligations net out. The numbers are obligations, not
+  revenue, and the caveat says so.
+- **SAM.gov limits.** A key with no SAM.gov role gets 10 requests a day (a role or system account, 1,000).
+  A page holds 100 actions, so a large contractor needs more pages than the quota: the section pages when
+  that fits, otherwise uses the async extract, and never uses a partial pull. Section 4's entity lookups
+  keep 5 calls back for this section while the cap is small (`entity_call_budget`). Actions on DoD
+  contracts under 90 days old are withheld by SAM.gov; the caveat says so.
+- **Fallback.** USAspending (same FPDS data): obligations by sub-agency for each window plus the largest
+  awards, whose amount is an amount to date and not split by window. Coverage is "partial" and the text
+  says which source and why.
+- **Not verified live.** The SAM.gov paged and extract paths were built and tested against mocks and one
+  real record; the daily quota was spent before they ran live.

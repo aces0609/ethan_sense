@@ -31,9 +31,10 @@ SECTION_TITLES: dict[int, str] = {
     12: "Investment Thesis and Debates",
     13: "Valuation",
     14: "Recent Developments",
+    15: "Federal Contract Awards by Agency",
 }
 
-RESEARCHED_SECTIONS: tuple[int, ...] = tuple(range(2, 15))
+RESEARCHED_SECTIONS: tuple[int, ...] = tuple(range(2, 16))
 
 
 def dict_merge(left: dict | None, right: dict | None) -> dict:
@@ -46,7 +47,7 @@ class Inputs(BaseModel):
     company_name: str
     ticker: str | None = None
     as_of_date: date = Field(default_factory=date.today)
-    sections: list[int] = Field(default_factory=lambda: list(range(1, 15)))
+    sections: list[int] = Field(default_factory=lambda: list(range(1, 16)))
     debug: bool = False
     offline: bool = False
     private: bool = (

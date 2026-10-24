@@ -54,6 +54,7 @@ SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
     12: ("investment thesis", "thesis", "debate", "bull vs"),
     13: ("valuation",),
     14: ("recent developments", "recent development", "recent events", "news"),
+    15: ("federal contract awards", "contract awards", "awards by agency"),
 }
 
 

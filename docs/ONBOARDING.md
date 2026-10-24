@@ -30,7 +30,8 @@ A company that has just listed changes path on its first 10-K. Re-run it then.
    says `(llm)` after the first run.
 3. **Firecrawl credits.** A run uses roughly 15 to 35 credits when its pages are cached and up to
    150 when they are not. Check the balance before a batch.
-4. **Sector.** The company's SIC code picks its sector tag from `config/sources.yaml`. Defense
+4. **SAM.gov quota.** Section 15 reads SAM.gov's Contract Awards API. A personal key with no SAM.gov role gets 10 requests a day; a key whose owner has a role, or a system account, gets 1,000. Set `SAM_GOV_DAILY_CAP` to what your key has. When the quota cannot cover the pull the section uses USAspending and says so.
+5. **Sector.** The company's SIC code picks its sector tag from `config/sources.yaml`. Defense
    codes are covered. For another sector, add the SIC ranges, the trade-press domains, the
    section briefs and the peer fallbacks there. That is a config change, not code.
 
@@ -102,6 +103,7 @@ Open `output/{TICKER}/{run_id}/` and check these in order.
 | 12 Thesis | Bull and bear rows are about this company; neutral ratings are not bull | Airbnb and Etsy upgrades in SpaceX's table; "Hold" counted as bull |
 | 13 Valuation | Price and share count are dated; multiples are n/a rather than invented when there is no earnings year | A page-scraped share count labelled "XBRL cover page" |
 | 14 Recent Developments | Everything inside twelve months; an event table, not boilerplate | An 8-K cover page read as the event |
+| 15 Federal Contract Awards | Agency totals for 12 months, 3 and 5 years; the basis line says SAM.gov or USAspending; the top contracts are real PIIDs | A SAM.gov quota spent by earlier calls, so the section fell back to USAspending |
 
 Two cross-checks catch most problems:
 

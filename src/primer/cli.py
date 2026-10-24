@@ -16,7 +16,7 @@ app = typer.Typer(help=f"Company Primer Agent {__version__}", no_args_is_help=Tr
 
 def _parse_sections(s: str | None) -> list[int]:
     if not s:
-        return list(range(1, 15))
+        return list(range(1, 16))
     out: set[int] = set()
     for part in s.split(","):
         part = part.strip()
@@ -25,7 +25,7 @@ def _parse_sections(s: str | None) -> list[int]:
             out.update(range(int(a), int(b) + 1))
         elif part:
             out.add(int(part))
-    return sorted(x for x in out if 1 <= x <= 14)
+    return sorted(x for x in out if 1 <= x <= 15)
 
 
 @app.command()
@@ -35,7 +35,7 @@ def run(
         None, "--ticker", "-t", help="Ticker, exchange-qualified if ambiguous"
     ),
     as_of: str | None = typer.Option(None, "--as-of", help="YYYY-MM-DD; defaults to today"),
-    sections: str | None = typer.Option(None, "--sections", "-s", help="e.g. '1,9' or '1-14'"),
+    sections: str | None = typer.Option(None, "--sections", "-s", help="e.g. '1,9' or '1-15'"),
     debug: bool = typer.Option(False, "--debug", help="Pause for review before export"),
     offline: bool = typer.Option(False, "--offline", help="Replay from cache/evidence only"),
     private: bool = typer.Option(

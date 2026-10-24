@@ -54,6 +54,10 @@ sections:
   12: {pages: 2.5, searches: 8, scrapes: 12, credits: 40}   # was 4 / 6 / 20; pages 2.5: the AlphaSense thesis sections run ~4 pages (2026-10-22)
   13: {pages: 1.5, searches: 3, scrapes: 5, credits: 16}   # private path: funding rounds and valuation
   14: {pages: 1.0, searches: 6, scrapes: 12, credits: 32}   # was 3 / 6 / 16
+  # 15: awards by agency. No web search; USAspending calls cost no Firecrawl credits. samgov_calls is
+  # how many SAM.gov requests the section may spend (a personal key has 10 a day, shared with the
+  # entity lookups of section 4; a key whose owner has a SAM.gov role has 1,000).
+  15: {pages: 2.0, searches: 0, scrapes: 0, credits: 0, samgov_calls: 8}
 
 # Larger caps for a private company, whose sections 7, 8, 10, 11 and 13 rest on the web alone
 # (the public caps above assume filings do the work). 2026-10-24, Anduril: sections 7 and 8 hit

@@ -353,3 +353,140 @@ def test_usaspending_category_totals_are_summed_across_batches(store, tmp_path, 
     top = resp["results"][0]
     assert top["name"] == "Department of the Navy" and top["amount"] == 300.0  # 3 batches x 100
     assert len(resp["results"]) == 2 and resp["page_metadata"]["batches"] == 3
+
+
+# ---- SAM.gov Contract Awards API --------------------------------------------------------------
+
+AWARDS = "https://api.sam.gov/contract-awards/v1/search"
+DOWNLOAD = "https://api.sam.gov/contract-awards/v1/download"
+
+
+def _records(n: int) -> list[dict]:
+    return [{"contractId": {"piid": f"P{i:04d}"}} for i in range(n)]
+
+
+@respx.mock
+def test_samgov_awards_one_page_when_the_total_fits(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    seen: list[dict] = []
+
+    def respond(request):
+        seen.append(dict(request.url.params))
+        return Response(200, json={"totalRecords": "40", "awardSummary": _records(40)})
+
+    respx.get(AWARDS).mock(side_effect=respond)
+    sam = SamGovClient(store, api_key="k", daily_cap=10)
+    out = sam.pull_contract_awards(
+        ["KC3CH2MSK7Q3", "AAAAAAAAAAAA"], date(2021, 10, 25), date(2026, 10, 24), max_calls=5
+    )
+    assert out["method"] == "pages" and out["calls"] == 1 and len(out["records"]) == 40
+    p = seen[0]
+    assert p["awardeeUniqueEntityId"] == "KC3CH2MSK7Q3~AAAAAAAAAAAA"  # the API's OR
+    assert p["dateSigned"] == "[10/25/2021,10/24/2026]" and p["limit"] == "100"
+    assert p["includeSections"] == "contractId,coreData,awardDetails"  # no awardee block
+
+
+@respx.mock
+def test_samgov_awards_pages_through_the_total_with_page_indexes(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    offsets: list[str] = []
+
+    def respond(request):
+        page = int(request.url.params["offset"])
+        offsets.append(request.url.params["offset"])
+        n = 100 if page < 2 else 50
+        return Response(200, json={"totalRecords": "250", "awardSummary": _records(n)})
+
+    respx.get(AWARDS).mock(side_effect=respond)
+    sam = SamGovClient(store, api_key="k", daily_cap=10)
+    out = sam.pull_contract_awards(["U"], date(2021, 10, 25), date(2026, 10, 24), max_calls=5)
+    assert out["method"] == "pages" and out["calls"] == 3 and len(out["records"]) == 250
+    assert offsets == ["0", "1", "2"]  # offset is a page index
+    assert sam.quota.used_today() == 3
+
+
+@respx.mock
+def test_samgov_awards_use_the_extract_when_the_pages_do_not_fit(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    state = {"downloads": 0}
+
+    def search(request):
+        if request.url.params.get("format") == "json":
+            return Response(
+                200,
+                json={
+                    "presignedUrl": f"{DOWNLOAD}?api_key=REPLACE_WITH_API_KEY&token=tok123",
+                    "exportToken": "tok123",
+                    "message": "File generation is in progress.",
+                },
+            )
+        return Response(200, json={"totalRecords": "450", "awardSummary": _records(100)})
+
+    def download(request):
+        state["downloads"] += 1
+        assert request.url.params["api_key"] == "k" and request.url.params["token"] == "tok123"
+        if state["downloads"] == 1:
+            return Response(200, json={"message": "File is not ready"})
+        return Response(200, json={"awardSummary": _records(450)})
+
+    respx.get(AWARDS).mock(side_effect=search)
+    respx.get(DOWNLOAD).mock(side_effect=download)
+    sam = SamGovClient(store, api_key="k", daily_cap=10)
+    out = sam.pull_contract_awards(
+        ["U"], date(2021, 10, 25), date(2026, 10, 24), max_calls=3, polls=3, wait=0.0
+    )
+    assert out["method"] == "extract" and len(out["records"]) == 450
+    assert state["downloads"] == 2  # not ready once, then ready
+    # the extract is cached whole: a second pull spends no download
+    again = sam.pull_contract_awards(
+        ["U"], date(2021, 10, 25), date(2026, 10, 24), max_calls=3, polls=3, wait=0.0
+    )
+    assert len(again["records"]) == 450 and state["downloads"] == 2
+
+
+@respx.mock
+def test_samgov_awards_never_return_a_partial_list(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    respx.get(AWARDS).mock(
+        return_value=Response(200, json={"totalRecords": "450", "awardSummary": _records(100)})
+    )
+    sam = SamGovClient(store, api_key="k", daily_cap=10)
+    with pytest.raises(RuntimeError, match="calls are available"):
+        sam.pull_contract_awards(
+            ["U"], date(2021, 10, 25), date(2026, 10, 24), max_calls=3, extract=False
+        )
+
+
+@respx.mock
+def test_samgov_quota_error_carries_the_time_the_key_works_again(store, tmp_path, monkeypatch):
+    from primer.clients.samgov import SamQuotaError
+
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    respx.get(AWARDS).mock(
+        return_value=Response(
+            429,
+            json={
+                "code": "900804",
+                "message": "Message throttled out",
+                "nextAccessTime": "2026-Oct-25 00:00:00+0000 UTC",
+            },
+        )
+    )
+    sam = SamGovClient(store, api_key="k", daily_cap=10)
+    with pytest.raises(SamQuotaError) as exc:
+        sam.pull_contract_awards(["U"], date(2021, 10, 25), date(2026, 10, 24), max_calls=3)
+    assert exc.value.next_access == "2026-Oct-25 00:00:00+0000 UTC"
+
+
+def test_entity_lookups_leave_the_awards_pull_its_calls_on_a_small_quota(
+    store, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    small = SamGovClient(store, api_key="k", daily_cap=10)
+    assert small.entity_call_budget(10) == 5  # 10 a day, 5 kept for section 15
+    small.quota.take(3)
+    assert small.entity_call_budget(10) == 2
+    small.quota.take(4)
+    assert small.entity_call_budget(10) == 0  # never negative
+    roomy = SamGovClient(store, api_key="k", daily_cap=1000)
+    assert roomy.entity_call_budget(10) == 10  # a key with a role needs no reserve

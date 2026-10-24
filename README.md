@@ -1,6 +1,6 @@
 # ethan_sense
 
-Company Primer Agent: give it a company name (and ticker, if public) and it writes a 14-section company primer as a single `.md` file, every factual claim cited to a fetched source. Built on LangGraph, Firecrawl, SEC EDGAR and US-government open-data APIs. No paid data subscription in v1.
+Company Primer Agent: give it a company name (and ticker, if public) and it writes a 15-section company primer as a single `.md` file (section 15 is federal contract awards by agency, from SAM.gov), every factual claim cited to a fetched source. Built on LangGraph, Firecrawl, SEC EDGAR and US-government open-data APIs. No paid data subscription in v1.
 
 **Status:** Phase 2 (fan-out) implemented: all thirteen researched sections plus Key Takeaways, the market-data adapter, the full validation gate and the eval scorecard. See [PLAN.md](PLAN.md) for the phases and gate status and [docs/DECISIONS.md](docs/DECISIONS.md) for the decisions and measurements.
 

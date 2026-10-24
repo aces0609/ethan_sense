@@ -347,6 +347,95 @@ class USAspendingClient:
             out["batch_errors"] = failures
         return out
 
+    def obligations_by_category(
+        self,
+        category: str,
+        uei_or_names: list[str],
+        start: date,
+        end: date,
+        limit: int = 40,
+    ) -> dict[str, Any]:
+        """Obligations by awarding agency (or another category) for transactions dated inside
+        [start, end]: a rolling window, where `spending_by_category` takes fiscal years. This is
+        the fallback behind section 15 when SAM.gov's quota cannot cover the pull; both report
+        the contract actions of the Federal Procurement Data System."""
+        body = {
+            "filters": {
+                "recipient_search_text": uei_or_names,
+                "time_period": [{"start_date": start.isoformat(), "end_date": end.isoformat()}],
+                "award_type_codes": CONTRACT_TYPES,
+            },
+            "limit": limit,
+            "page": 1,
+        }
+        if self.runlog:
+            self.runlog.query("usaspending_obligations", json.dumps(body["filters"]))
+        if len(uei_or_names) > self.MAX_TERMS:
+            resp = self._batched_category(category, body, uei_or_names, limit)
+        else:
+            resp = self._post(f"/search/spending_by_category/{category}/", body)
+        rec = self._register(
+            f"USAspending obligations by {category}, {start.isoformat()} to {end.isoformat()}, "
+            f"for {', '.join(uei_or_names)} ({request_summary(body['filters'])})",
+            f"{API}/search/spending_by_category/{category}/",
+            resp,
+            gov_id=None,
+            meta={
+                "category": category,
+                "request": {
+                    "method": "POST",
+                    "path": f"/search/spending_by_category/{category}/",
+                    "body": body,
+                },
+            },
+        )
+        resp["source_id"] = rec.source_id if rec else None
+        return resp
+
+    def awards_in_window(
+        self,
+        uei_or_names: list[str],
+        start: date,
+        end: date,
+        page: int = 1,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """The largest prime contract awards with activity inside [start, end], by award amount
+        (the amount to date, not what the window obligated)."""
+        filters: dict[str, Any] = {
+            "recipient_search_text": uei_or_names,
+            "time_period": [{"start_date": start.isoformat(), "end_date": end.isoformat()}],
+            "award_type_codes": CONTRACT_TYPES,
+        }
+        body = {
+            "filters": filters,
+            "fields": AWARD_FIELDS,
+            "limit": limit,
+            "page": page,
+            "sort": "Award Amount",
+            "order": "desc",
+            "subawards": False,
+        }
+        if self.runlog:
+            self.runlog.query("usaspending_spending_by_award", json.dumps(filters))
+        if len(uei_or_names) > self.MAX_TERMS:
+            resp = self._batched_awards(body, uei_or_names, limit, page, "Award Amount")
+        else:
+            resp = self._post("/search/spending_by_award/", body)
+        rec = self._register(
+            f"USAspending prime awards active {start.isoformat()} to {end.isoformat()} for "
+            f"{', '.join(uei_or_names)} (page {page}; {request_summary(filters, 'Award Amount', page)})",
+            f"{API}/search/spending_by_award/",
+            resp,
+            gov_id=None,
+            meta={
+                "page": page,
+                "request": {"method": "POST", "path": "/search/spending_by_award/", "body": body},
+            },
+        )
+        resp["source_id"] = rec.source_id if rec else None
+        return resp
+
     def spending_by_category(
         self, category: str, uei_or_names: list[str], fy_from: int, fy_to: int, limit: int = 20
     ) -> dict[str, Any]:

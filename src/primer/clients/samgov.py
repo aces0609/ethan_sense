@@ -28,6 +28,26 @@ from primer.runlog import RunLog
 
 ENTITY_URL = "https://api.sam.gov/entity-information/v3/entities"
 OPPS_URL = "https://api.sam.gov/opportunities/v2/search"
+AWARDS_URL = "https://api.sam.gov/contract-awards/v1/search"
+# the sections an awards pull needs; the awardee block is the bulk of a record and is left out
+AWARD_SECTIONS = "contractId,coreData,awardDetails"
+PAGE = 100  # the most records a page can hold
+# The API's daily limit is 10 requests for a personal key with no SAM.gov role and 1,000 for a key
+# whose owner has a role or a system account (docs: open.gsa.gov/api/contract-awards). A key's
+# limit is set on the SAM.gov side; SAM_GOV_DAILY_CAP tells this client what to expect.
+DEFAULT_DAILY_CAP = 10
+# Calls kept back for the awards pull (a probe, an extract request and its polls) while the
+# daily cap is small; an entity lookup in section 4 may not spend them.
+AWARDS_RESERVE = 5
+
+
+class SamQuotaError(RuntimeError):
+    """SAM.gov refused the call: the key's daily quota is spent (HTTP 429). `next_access` is the
+    time the server says the key works again, when it says."""
+
+    def __init__(self, message: str, next_access: str | None = None) -> None:
+        super().__init__(message)
+        self.next_access = next_access
 
 
 class SamGovClient:
@@ -46,7 +66,7 @@ class SamGovClient:
         self.http = client or httpx.Client(timeout=120.0)
         root = output_root()
         self.cache = DiskCache(root, "samgov", ttl_seconds=7 * 24 * 3600, offline=offline)
-        cap = daily_cap or int(os.environ.get("SAM_GOV_DAILY_CAP", "30"))
+        cap = daily_cap or int(os.environ.get("SAM_GOV_DAILY_CAP", str(DEFAULT_DAILY_CAP)))
         self.quota = DailyQuota(root / ".samgov_quota.json", cap)
 
     @property
@@ -64,7 +84,15 @@ class SamGovClient:
                 self.runlog.count("samgov_calls")
             r = self.http.get(url, params={**params, "api_key": self.api_key})
             if r.status_code == 429:
-                raise RuntimeError("SAM.gov 429: daily quota exhausted on the server side")
+                try:
+                    nxt = r.json().get("nextAccessTime")
+                except ValueError:
+                    nxt = None
+                raise SamQuotaError(
+                    "SAM.gov 429: daily quota exhausted on the server side"
+                    + (f" (works again {nxt})" if nxt else ""),
+                    nxt,
+                )
             r.raise_for_status()
             return r.json()
 
@@ -165,6 +193,138 @@ class SamGovClient:
         return out
 
     # ---- opportunities ---------------------------------------------------------------
+
+    # ---- contract awards -----------------------------------------------------------
+
+    @staticmethod
+    def _awards_params(ueis: list[str], start: date, end: date) -> dict[str, Any]:
+        """Up to 100 UEIs go in one parameter, joined by ~ (the API's OR)."""
+        return {
+            "awardeeUniqueEntityId": "~".join(ueis[:100]),
+            "dateSigned": f"[{start.strftime('%m/%d/%Y')},{end.strftime('%m/%d/%Y')}]",
+        }
+
+    def contract_awards(
+        self,
+        ueis: list[str],
+        start: date,
+        end: date,
+        page: int = 0,
+        limit: int = PAGE,
+        sections: str | None = AWARD_SECTIONS,
+    ) -> dict[str, Any]:
+        """One page of contract actions signed in [start, end] for the awardee UEIs. `offset` is
+        a page index. Returns {awardSummary, totalRecords, limit, offset}."""
+        params = self._awards_params(ueis, start, end)
+        params.update({"limit": limit, "offset": page})
+        if sections:
+            params["includeSections"] = sections
+        if self.runlog:
+            self.runlog.query("samgov_awards", json.dumps(params))
+        return self._get(AWARDS_URL, params)
+
+    def entity_call_budget(self, per_primer: int) -> int:
+        """How many calls an entity lookup may spend: the per-primer budget, less the calls
+        kept for the awards pull when the daily cap is small. A key with a high cap
+        (a SAM.gov role: 1,000 a day) needs no reserve."""
+        if self.quota.cap > 4 * AWARDS_RESERVE:
+            return per_primer
+        return max(0, min(per_primer, self.quota.remaining() - AWARDS_RESERVE))
+
+    def awards_remaining_calls(self) -> int:
+        return self.quota.remaining()
+
+    def pull_contract_awards(
+        self,
+        ueis: list[str],
+        start: date,
+        end: date,
+        max_calls: int,
+        extract: bool = True,
+        polls: int = 3,
+        wait: float = 20.0,
+    ) -> dict[str, Any]:
+        """Every contract action signed in [start, end] for the UEIs, or an exception.
+
+        One probe page reads `totalRecords`. When the pages fit in `max_calls` (and in what is
+        left of the daily quota) they are fetched one by one; otherwise the asynchronous JSON
+        extract is requested and polled (it carries up to a million records for two or three
+        requests). Anything short of every record raises: a partial list would give wrong totals,
+        so the caller falls back to another source instead. Returns {records, total, method,
+        calls}."""
+        calls = 1
+        probe = self.contract_awards(ueis, start, end, page=0, limit=PAGE)
+        total = int(probe.get("totalRecords") or 0)
+        records = list(probe.get("awardSummary") or [])
+        pages = -(-total // PAGE)
+        budget = min(max_calls, self.awards_remaining_calls() + calls)
+        if total <= len(records):
+            return {"records": records, "total": total, "method": "pages", "calls": calls}
+        if pages <= budget:
+            for page in range(1, pages):
+                resp = self.contract_awards(ueis, start, end, page=page, limit=PAGE)
+                calls += 1
+                records.extend(resp.get("awardSummary") or [])
+            if len(records) < total:
+                raise RuntimeError(f"SAM.gov returned {len(records)} of {total} actions")
+            return {"records": records, "total": total, "method": "pages", "calls": calls}
+        if not extract:
+            raise RuntimeError(
+                f"SAM.gov holds {total} actions ({pages} pages); {budget} calls are available"
+            )
+        records = self._extract(ueis, start, end, polls, wait)
+        if len(records) < total:
+            raise RuntimeError(f"SAM.gov extract held {len(records)} of {total} actions")
+        return {"records": records, "total": total, "method": "extract", "calls": calls + 1 + polls}
+
+    def _extract(
+        self, ueis: list[str], start: date, end: date, polls: int, wait: float
+    ) -> list[dict[str, Any]]:
+        """The asynchronous JSON extract: a request with format=json answers with a download URL
+        and token; the file is fetched once it is ready. Cached whole, so a rerun costs nothing."""
+        import time
+
+        params = self._awards_params(ueis, start, end)
+        params.update({"format": "json", "includeSections": AWARD_SECTIONS})
+        key = f"extract:{AWARDS_URL}?{json.dumps(params, sort_keys=True)}"
+
+        def fetch() -> dict[str, Any]:
+            first = self._get_uncached(AWARDS_URL, params)
+            url = str(first.get("presignedUrl") or "")
+            if not url:
+                raise RuntimeError(f"SAM.gov extract gave no download link: {first}")
+            url = url.replace("REPLACE_WITH_API_KEY", self.api_key)
+            for i in range(polls):
+                if i:
+                    time.sleep(wait * i)
+                self.quota.take(1)
+                if self.runlog:
+                    self.runlog.count("samgov_calls")
+                r = self.http.get(url)
+                if r.status_code == 429:
+                    raise SamQuotaError("SAM.gov 429 while downloading the extract")
+                if r.status_code == 200:
+                    try:
+                        body = r.json()
+                    except ValueError:
+                        body = {}
+                    if isinstance(body, dict) and "awardSummary" in body:
+                        return {"awardSummary": body["awardSummary"]}
+                    if isinstance(body, list):
+                        return {"awardSummary": body}
+            raise RuntimeError("SAM.gov extract file was not ready after the polls")
+
+        return list(self.cache.get_or_fetch(key, fetch).get("awardSummary") or [])
+
+    def _get_uncached(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
+        self.quota.take(1)
+        if self.runlog:
+            self.runlog.count("samgov_calls")
+        r = self.http.get(url, params={**params, "api_key": self.api_key})
+        if r.status_code == 429:
+            raise SamQuotaError("SAM.gov 429: daily quota exhausted on the server side")
+        r.raise_for_status()
+        return r.json()
 
     def opportunities(
         self,

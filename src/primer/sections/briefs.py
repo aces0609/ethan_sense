@@ -285,6 +285,25 @@ _TEMPLATES: dict[int, dict] = {
         required_exhibit="Dated event log, newest first, with one-line implication",
         common_failure="Recency not enforced; press-release language copied as analysis.",
     ),
+    15: dict(
+        scope=(
+            "Federal contract obligations by awarding agency (DoD by service, then each civil "
+            "department) over the last 12 months, 3 years and 5 years, and the largest contracts "
+            "behind each agency's total."
+        ),
+        source_buckets=["SAM.gov Contract Awards API", "USAspending"],
+        structured_first=[
+            "samgov:contract awards by awardee UEI, signed in the last five years",
+            "usaspending:obligations by awarding sub-agency (fallback)",
+        ],
+        web_queries=[],
+        sub_questions=[
+            "How much did each awarding agency obligate to the company in the last 12 months, 3 years and 5 years?",
+            "Which contracts are the largest at each of the top agencies, and what do they buy?",
+        ],
+        required_exhibit="Obligations by awarding agency for three windows; largest contracts of the top agencies",
+        common_failure="Windows added together; contract ceilings called obligations; DoD's unreleased last 90 days not disclosed.",
+    ),
 }
 
 

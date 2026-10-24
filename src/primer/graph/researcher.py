@@ -58,6 +58,7 @@ REGISTRY: dict[int, str] = {
     12: "primer.sections.sec12_thesis",
     13: "primer.sections.sec13_valuation",
     14: "primer.sections.sec14_recent",
+    15: "primer.sections.sec15_awards",
 }
 HANDLERS: dict[int, Any] = {}
 

@@ -114,6 +114,7 @@ acquisitions note, guidance and quarterly results. A handler test runs the real 
 from primer.graph.researcher import build_researcher
 from primer.graph.main import new_run, intake, resolve_entity, foundation_pack, plan_sections
 
+
 def _state(inputs):
     run_id, run_dir = new_run(inputs)
     st = {"inputs": inputs.model_dump(mode="json"), "run_id": run_id, "run_dir": str(run_dir)}
@@ -121,8 +122,18 @@ def _state(inputs):
         st.update(node(st))
     return st
 
-out = build_researcher().invoke({"run_dir": st["run_dir"], "as_of": st["as_of"], "entity": st["entity"],
-                                 "foundation": st["foundation"], "brief": st["plan"][N], "iteration": 0, "critic_notes": []})
+
+out = build_researcher().invoke(
+    {
+        "run_dir": st["run_dir"],
+        "as_of": st["as_of"],
+        "entity": st["entity"],
+        "foundation": st["foundation"],
+        "brief": st["plan"][N],
+        "iteration": 0,
+        "critic_notes": [],
+    }
+)
 draft = out["drafts"][N]
 ```
 

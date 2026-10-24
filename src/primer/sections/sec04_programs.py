@@ -989,7 +989,8 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
     res["sam"] = {"available": ctx.samgov is not None, "entities": []}
     if ctx.samgov is not None and uei_set:
         try:
-            sam_budget = int(budgets_config().get("per_primer", {}).get("samgov_calls", 10))
+            per_primer = int(budgets_config().get("per_primer", {}).get("samgov_calls", 10))
+            sam_budget = ctx.samgov.entity_call_budget(per_primer)  # section 15 keeps its share
             # the UEI set is ordered by award total, so the registrations that matter most
             # come first; one call per UEI, never a name search
             ents = ctx.samgov.entities_by_uei(list(uei_set), max_calls=sam_budget)
