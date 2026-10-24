@@ -84,6 +84,7 @@ NOT_FIRM_FIRST = {
     "An",
 }
 TARGET_IN_TEXT = re.compile(r"(?:price )?target (?:price )?(?:to|of|at) \$([\d,]+(?:\.\d+)?)", re.I)
+RATING_ROWS_PER_SIDE = 8
 ANSWER_WORDS = 90  # cap on the management answer kept with a question (page budget, review fix 7)
 TITLE_WORDS = ("officer", "president", "chairman", "treasurer", "ceo", "cfo", "coo", "head of")
 
@@ -306,6 +307,21 @@ def parse_qa(md: str, quarter: str, source_id: str, max_questions: int = 6) -> l
 # ---- rating changes ----------------------------------------------------------------------
 
 
+NEUTRAL_RATINGS = (
+    "neutral",
+    "hold",
+    "market perform",
+    "equal weight",
+    "equal-weight",
+    "sector perform",
+    "in line",
+    "in-line",
+    "peer perform",
+    "mixed",
+    "sector weight",
+)
+
+
 def classify_rating(action: str, rating: str | None) -> str:
     """The rating decides the column when it is directional (a Sell with a raised target is
     still a bear point); the action decides only for neutral ratings or no rating."""
@@ -315,11 +331,23 @@ def classify_rating(action: str, rating: str | None) -> str:
         return "bear"
     if any(k in r for k in ("buy", "overweight", "outperform", "positive", "accumulate")):
         return "bull"
+    if any(k in r for k in NEUTRAL_RATINGS):
+        return "open"  # a Neutral or Hold is neither case, whatever happened to the target
     if any(k in a for k in ("upgrad", "boost", "raise", "increase")):
         return "bull"
     if any(k in a for k in ("downgrad", "lower", "cut", "reduce", "decrease")):
         return "bear"
     return "open"
+
+
+def _contradicts(action: str, rating: str | None) -> bool:
+    """An upgrade to a sell-type rating, or a downgrade to a buy-type one."""
+    a, r = (action or "").lower(), (rating or "").lower()
+    sell = any(k in r for k in ("sell", "underweight", "underperform", "negative", "reduce"))
+    buy = any(k in r for k in ("buy", "overweight", "outperform", "positive", "accumulate"))
+    return (sell and any(k in a for k in ("upgrad", "boost", "raise"))) or (
+        buy and any(k in a for k in ("downgrad", "lower", "cut"))
+    )
 
 
 def rating_points(
@@ -338,7 +366,11 @@ def rating_points(
         side = classify_rating(getattr(rc, "action", ""), getattr(rc, "rating", None))
         d = getattr(rc, "date", None)
         when = d.isoformat() if isinstance(d, date) else "n.d."
-        bits = [getattr(rc, "action", "rating")]
+        action_word = getattr(rc, "action", "rating")
+        if _contradicts(action_word, getattr(rc, "rating", None)):
+            # "upgrade to Strong Sell" cannot be right: show the rating, not the direction
+            action_word = f"rating (source labels the action '{action_word}')"
+        bits = [action_word]
         if getattr(rc, "rating", None):
             bits.append(
                 f"to {rc.rating}"
@@ -369,12 +401,38 @@ def rating_points(
     return points, claims, skipped
 
 
+def _plain(text: str) -> str:
+    """Markdown links and emphasis out, so a cell never ends in half a link."""
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    return re.sub(r"[*_`#]+", "", text)
+
+
+# What comes right after the verb: a named object ("upgraded Airbnb", "upgraded SpaceX") unless
+# it is a pronoun, a determiner or the next part of the sentence ("raised its price target").
+OTHER_COMPANY = re.compile(
+    r"^\s+(?!(?:to|its|the|his|their|our|a|an|shares|stock|price|rating|target|from|coverage|on|of|in|"
+    r"ahead|estimates?|forecasts?|expectations?|guidance|numbers?|outlook|sales|revenue|earnings|EPS)\b)"
+    r"([A-Z][\w&.'-]+(?: [A-Z][\w&.'-]+){0,2})"
+)
+
+
 def page_points(
-    text: str, source_id: str, published: date | None, company_names: list[str]
+    text: str,
+    source_id: str,
+    published: date | None,
+    company_names: list[str],
+    ticker: str | None = None,
 ) -> list[Point]:
-    """Upgrade/downgrade sentences on a news page that name the firm in the page's own text."""
-    flat = " ".join(text.split())
+    """Upgrade/downgrade sentences on a news page that are about the company.
+
+    A page such as Yahoo's analyst-action list covers a dozen companies: a row counts only when
+    its own sentence names the company or its ticker (Airbnb, Atlassian and Etsy upgrades were
+    in SpaceX's table), the firm looks like a firm ("Earth. The" was read from a spacecraft
+    sentence), and the cell holds plain text."""
+    flat = " ".join(_plain(text).split())
     me = {norm_company(n).split()[0] for n in company_names if norm_company(n)}
+    needles = {m for m in me if len(m) >= 5} | ({ticker.lower()} if ticker else set())
     out: list[Point] = []
     seen: set[str] = set()
     for m in PAGE_ACTION.finditer(flat):
@@ -383,6 +441,13 @@ def page_points(
         first = firm.split()[0] if firm.split() else ""
         if not words or first in NOT_FIRM_FIRST or words[0] in me:
             continue
+        if re.search(r"[a-z]\.\s", firm) or re.search(r"[.]\s+[A-Z]", firm):
+            continue  # "Earth. The": two sentences glued together, not a firm
+        obj = OTHER_COMPANY.match(rest)
+        if obj:
+            named = norm_company(obj.group(1)).split()
+            if named and named[0] not in me and obj.group(1).lower() not in needles:
+                continue  # "upgraded Airbnb": an action on another company
         if verb in ("upgraded", "raised"):
             side = "bull"
         elif verb in ("downgraded", "lowered", "cut"):
@@ -484,7 +549,12 @@ def thesis_exhibit(
     rating_sid: str | None,
     section: int = 12,
 ) -> ThesisExhibit:
-    points: list[Point] = list(rating) + list(news)
+    # a list of thirty-five broker actions buried the bull and bear arguments: the newest eight
+    # on each side stay, and the line under the table says how many were left out
+    rating_bull = [p for p in rating if p.side == "bull"][:RATING_ROWS_PER_SIDE]
+    rating_bear = [p for p in rating if p.side == "bear"][:RATING_ROWS_PER_SIDE]
+    rating_cut = len(rating) - len(rating_bull) - len(rating_bear)
+    points: list[Point] = [*rating_bull, *rating_bear, *news]
     for d in debates:
         if d.lean in ("bull", "bear"):
             points.append(
@@ -505,6 +575,12 @@ def thesis_exhibit(
         r = f"{bear[i].text} [{bear[i].source_id}]" if i < len(bear) else "no sourced item"
         rows.append([b, r])
     md = md_table(["Bull case (sourced)", "Bear case (sourced)"], rows, align_right_from=99)
+    if rating_cut > 0:
+        md += (
+            "\n\n"
+            f"*The {RATING_ROWS_PER_SIDE} newest bull and bear rating changes are shown; "
+            f"{rating_cut} older ones on the same page are left out.*"
+        )
     # The list holds the questions management did not answer or deferred. Answered questions are
     # already in the debates narrative and in the table, so repeating them with their answers
     # here doubled section 12's length (4.1 pages against a 3.75-page limit on 2026-10-22).

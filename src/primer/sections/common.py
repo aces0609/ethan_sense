@@ -598,6 +598,34 @@ def is_first_party_source(rec: SourceRecord, ctx: ToolContext) -> bool:
     return False
 
 
+PER_PERSON_FIGURE = re.compile(
+    r"per[- ](?:employee|head|user|subscriber|customer)|(?:employee|headcount)[- ]based",
+    re.I,
+)
+
+
+def drop_unit_mismatch_conflicts(text: str) -> tuple[str, int]:
+    """Remove a "> Conflict:" note that sets a per-employee, per-user or per-subscriber figure
+    against a company total. Such a figure is a different quantity, so the two cannot conflict
+    (SpaceX private run: "profits per employee of -$155,955" against Q3 net income of $4.4bn).
+    Per-share notes stay: a consensus EPS against another EPS is a real conflict. Returns the
+    text and the number of notes removed."""
+    kept: list[str] = []
+    dropped = 0
+    for line in text.splitlines():
+        if (
+            line.lstrip().startswith(">")
+            and re.match(r">\s*Conflict\b", line.lstrip())
+            and PER_PERSON_FIGURE.search(line)
+        ):
+            dropped += 1
+            continue
+        kept.append(line)
+    if not dropped:
+        return text, 0
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip(), dropped
+
+
 def drop_first_party_perspectives(narrative: str, ctx: ToolContext) -> tuple[str, bool]:
     """Remove the '### Perspectives' block when no bullet cites a second-party source
     (only the company's own documents or Wikipedia). Returns (narrative, dropped)."""
@@ -698,6 +726,11 @@ def finalize_draft(
     if narrative:
         narrative, moved = scrub_pipeline_vocabulary(narrative)
         hygiene_notes.extend(moved)
+        narrative, n_unit = drop_unit_mismatch_conflicts(narrative)
+        if n_unit:
+            hygiene_notes.append(
+                "a per-person figure (per employee, per user) was not set against a company total"
+            )
         narrative, dropped_persp = drop_first_party_perspectives(narrative, ctx)
         if dropped_persp:
             hygiene_notes.append(

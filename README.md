@@ -8,6 +8,7 @@ Company Primer Agent: give it a company name (and ticker, if public) and it writ
 - [PLAN.md](PLAN.md) — phased build plan with per-item tests, exit gates, open decisions and risks
 - [docs/DECISIONS.md](docs/DECISIONS.md) — decisions taken after Oct 21, 2026
 - [docs/HANDLERS.md](docs/HANDLERS.md) — the contract every section handler follows
+- [docs/ONBOARDING.md](docs/ONBOARDING.md) — how to add a company and check the result
 
 ## Install
 

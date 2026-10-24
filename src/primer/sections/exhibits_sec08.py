@@ -48,6 +48,8 @@ class Holder:
     shares: str | None
     source_id: str
     is_group: bool = False
+    voting_pct: float | None = None  # combined voting power, when a dual-class table gives it
+    pct_basis: str = "shares"  # "Class A shares" when the table's first percentage is Class A's
 
 
 @dataclass
@@ -108,16 +110,21 @@ def officer_rows(
 def ownership_rows(proxy_text: str, proxy_sid: str, min_pct: float = 1.0) -> list[Holder]:
     out: list[Holder] = []
     seen: set[str] = set()
+    # a dual-class table prints Class A %, Class B %, then combined voting power, before and after
+    # the offering: the third percentage is the voting power (SpaceX: Mr. Musk 12.3%, 93.6%, 85.1%)
+    dual_class = "combined voting power" in proxy_text.lower()
     for line in proxy_text.splitlines():
         if "|" not in line or "%" not in line:
             continue
         cells = [c.strip() for c in line.split("|") if c.strip()]
         pct = None
+        pcts: list[float] = []
         for c in cells:
             m = PCT_CELL.match(c.replace(" ", ""))
             if m:
-                pct = float(m.group(1))
-                break
+                pcts.append(float(m.group(1)))
+        if pcts:
+            pct = pcts[0]
         if pct is None:
             continue
         name = next(
@@ -143,7 +150,11 @@ def ownership_rows(proxy_text: str, proxy_sid: str, min_pct: float = 1.0) -> lis
         if key in seen:
             continue
         seen.add(key)
-        out.append(Holder(name, pct, shares, proxy_sid, is_group))
+        voting = pcts[2] if dual_class and len(pcts) >= 6 else None
+        basis = (
+            "Class A shares" if voting is not None and "class a" in proxy_text.lower() else "shares"
+        )
+        out.append(Holder(name, pct, shares, proxy_sid, is_group, voting, basis))
     return out
 
 
@@ -234,7 +245,12 @@ def governance_exhibit(
         c = f" [{h.source_id}]"
         shares = f" ({h.shares} shares)" if h.shares else ""
         label = "directors and executive officers as a group" if h.is_group else h.holder
-        bullets.append(f"- {label}: {h.pct:.1f}% of shares beneficially owned{shares}{c}")
+        voting = (
+            f" and {h.voting_pct:.1f}% of combined voting power" if h.voting_pct is not None else ""
+        )
+        bullets.append(
+            f"- {label}: {h.pct:.1f}% of {h.pct_basis} beneficially owned{shares}{voting}{c}"
+        )
         slug = re.sub(r"[^a-z0-9]+", "_", h.holder.lower()).strip("_")[:40]
         if h.is_group:
             slug = "directors_and_officers_group"
@@ -249,11 +265,23 @@ def governance_exhibit(
         )
         if k:
             claims.append(k)
+        if h.voting_pct is not None:
+            kv = claim(
+                section,
+                f"voting_power_pct_{slug}",
+                h.voting_pct,
+                period,
+                [h.source_id],
+                unit="pct",
+                note="combined voting power per the ownership table",
+            )
+            if kv:
+                claims.append(kv)
         if h.source_id not in used:
             used.append(h.source_id)
     if bullets and facts.voting_power_mentioned:
         bullets.append(
-            "- Percentages are beneficial ownership as reported in the proxy table; the proxy "
+            "- Percentages are beneficial ownership as reported in the proxy table; the filing "
             "separately describes voting power, which is not the same measure"
             + (f" [{facts.source_id}]" if facts.source_id else "")
         )

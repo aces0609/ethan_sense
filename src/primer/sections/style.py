@@ -117,9 +117,18 @@ _OWN_TENK_ITEM = re.compile(r"(?<!peer )(?<!peers' )(?<!peer's )\b10-K Item (\d{
 _OWN_TENK = re.compile(r"(?<!peer )(?<!peers' )(?<!peer's )\b10-K\b")
 
 
+_A_PROXY = re.compile(r"\ba (?:DEF 14A|proxy statement)\b")
+_PROXY_TABLE = re.compile(r"\bproxy table\b")
+_PROXY = re.compile(r"(\b(?:the |our )?)(?:DEF 14A|proxy statement)\b")
+
+
 def relabel_annual_document(md: str, label: str = "IPO prospectus") -> str:
     """Handlers write "10-K" for the company's annual document. For a company with no 10-K yet
     that document is its IPO prospectus (foundation `annual_basis`), so the wording follows it;
     a peer's 10-K keeps its name."""
     md = _OWN_TENK_ITEM.sub(lambda m: _PROSPECTUS_ITEMS.get(m.group(1), label), md)
-    return _OWN_TENK.sub(label, md)
+    md = _OWN_TENK.sub(label, md)
+    # a company with no 10-K has no proxy statement either: section 8 reads the prospectus
+    md = _A_PROXY.sub("an " + label, md)
+    md = _PROXY_TABLE.sub("ownership table", md)
+    return _PROXY.sub(lambda m: m.group(1) + label, md)

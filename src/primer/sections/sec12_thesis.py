@@ -155,6 +155,7 @@ def draft(
                 p["sid"],
                 rec.published_date,
                 [ctx.entity.name, *ctx.entity.aliases],
+                ticker=ctx.entity.ticker,
             )
         )
     item7, sid7 = ctx.item_text("7")

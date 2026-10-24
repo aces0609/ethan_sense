@@ -461,3 +461,252 @@ def test_the_announce_date_is_the_earliest_filing_and_a_dollar_value_sits_beside
     assert row.date == "2026-06-16"
     md = acquisition_table(deals).markdown
     assert "$60 billion [src_0063]" in md and "consideration: 389,289,254 shares [src_0011]" in md
+
+
+def test_rounds_pair_an_amount_with_a_valuation_only_when_one_sentence_states_both(tmp_path):
+    """A funding-history page dates every undated figure by the page date, so the seed round and
+    the 2022 valuation shared one row and the other amounts on the date vanished."""
+    from primer.evidence.store import EvidenceStore
+    from primer.sections.private import Datapoint, rounds_table
+
+    store = EvidenceStore(tmp_path / "run", as_of=date(2026, 10, 24))
+    page = store.register(
+        "funding history", type="news", publisher="History Site", title="t",
+        url="https://history.example.com/spacex", tier=2, published_date=date(2025, 7, 31),
+    )  # fmt: skip
+    sid = page.source_id
+
+    def dp(kind, label, value, quote):
+        return Datapoint(
+            kind, f"press_{kind}", label, value, "USD", "2025-07-31", "reported", sid, quote
+        )
+
+    seed = "Elon Musk put $100 million of seed funding into SpaceX."
+    val = "By 2022 investors had taken the valuation of SpaceX to $127 billion."
+    both = "In 2023 SpaceX raised $750 million at a $350 billion valuation."
+    table = rounds_table(
+        [
+            dp("funding", "Funding raised (seed)", 100e6, seed),
+            dp("valuation", "Valuation", 127e9, val),
+            dp("funding", "Funding raised", 750e6, both),
+            dp("valuation", "Valuation", 350e9, both),
+        ],
+        store,
+    )
+    rows = [ln for ln in table.splitlines() if ln.startswith("| 2025-07-31")]
+    assert len(rows) == 3  # seed, valuation, and the round that states both
+    seed_row = next(r for r in rows if "$100 million" in r)
+    assert "$127 billion" not in seed_row
+    both_row = next(r for r in rows if "$750 million" in r)
+    assert "$350 billion" in both_row  # one sentence states both
+
+
+def test_a_conflict_note_comparing_a_per_employee_figure_with_a_total_is_dropped():
+    from primer.sections.common import drop_unit_mismatch_conflicts
+
+    text = (
+        "### Operating\n\nRevenue grew [src_0001].\n\n"
+        "> Conflict: StockAnalysis.com shows negative profits per employee (-$155,955) [src_0039], "
+        "while the company reports Q3 2026 net income of $4.4 billion [src_0001].\n\n"
+        "> Conflict: Q3 consensus EPS is $0.16 on Yahoo Finance [src_0004] but $0.13 per LSEG "
+        "[src_0005].\n\n"
+        "More prose [src_0001]."
+    )
+    out, n = drop_unit_mismatch_conflicts(text)
+    assert n == 1
+    assert "per employee" not in out
+    assert "consensus EPS" in out  # a per-share conflict is real and stays
+    assert "More prose" in out and "\n\n\n" not in out
+    assert drop_unit_mismatch_conflicts("no conflicts here") == ("no conflicts here", 0)
+
+
+# ---- section 12: the bull/bear table ----------------------------------------------------------
+
+
+def test_neutral_and_hold_ratings_are_neither_bull_nor_bear():
+    from primer.sections.exhibits_sec12 import classify_rating
+
+    assert classify_rating("boost target", "Neutral") == "open"  # was bull: the action won
+    assert classify_rating("upgrade", "Hold") == "open"
+    assert classify_rating("initiated coverage", "Equal Weight") == "open"
+    assert classify_rating("reiterated", "Outperform") == "bull"
+    assert classify_rating("boost target", "Strong Sell") == "bear"
+    assert classify_rating("upgrade", None) == "bull"
+
+
+def test_an_action_that_contradicts_the_rating_is_not_asserted():
+    """'Phillip Securities: upgrade to Strong Sell' cannot be right; the source's label is
+    reported as a label and no direction is claimed."""
+    from primer.sections.exhibits_sec12 import rating_points
+
+    rc = SimpleNamespace(
+        source_id="src_0075",
+        firm="Phillip Securities",
+        action="upgrade",
+        rating="Strong Sell",
+        rating_prior=None,
+        target=75.0,
+        target_prior=None,
+        date=date(2026, 7, 31),
+        publisher="MarketBeat",
+    )
+    points, _claims, _skipped = rating_points([rc], {"src_0075": "Phillip Securities rates it"})
+    assert points[0].side == "bear"
+    assert "upgrade to Strong Sell" not in points[0].text
+    assert "source labels the action 'upgrade'" in points[0].text
+
+
+def test_news_rows_are_about_the_company_and_start_with_a_real_firm():
+    from primer.sections.exhibits_sec12 import page_points
+
+    page = (
+        "Wedbush upgraded **Airbnb** [(ABNB)](https://finance.example.com/quote/ABNB) to Outperform. "
+        "JPMorgan upgraded Etsy to Overweight. "
+        "Argus upgraded **SpaceX** [(SPCX)](https://finance.example.com/quote/SPCX) to Buy. "
+        "The Dragon trunk is delivered to Earth. The upgraded cargo spacecraft pioneered docking."
+    )
+    pts = page_points(
+        page,
+        "src_0077",
+        date(2026, 10, 20),
+        ["SPACE EXPLORATION TECHNOLOGIES CORP", "SpaceX"],
+        "SPCX",
+    )
+    assert [p.firm for p in pts] == ["Argus"]
+    assert "](" not in pts[0].text and "**" not in pts[0].text  # no half-links in a cell
+    assert page_points(page, "src_0077", None, ["SpaceX"], "SPCX")[0].firm == "Argus"
+
+
+def test_the_thesis_table_keeps_the_newest_eight_ratings_per_side_and_says_so():
+    from primer.sections.exhibits_sec12 import Point, thesis_exhibit
+
+    bull = [
+        Point("bull", f"Firm{i}: reiterated rating to Buy", "src_0075", f"Firm{i}", "rating")
+        for i in range(12)
+    ]
+    bear = [Point("bear", "FirmX: initiated coverage to Sell", "src_0075", "FirmX", "rating")]
+    ex = thesis_exhibit(
+        debates=[], rating=bull + bear, rating_claims=[], news=[], company=[],
+        rating_count=13, rating_sid="src_0075",
+    )  # fmt: skip
+    rows = [ln for ln in ex.markdown.splitlines() if ln.startswith("| Firm")]
+    assert len(rows) == 8
+    assert "4 older ones on the same page are left out" in ex.markdown
+
+
+# ---- section 8: officers and ownership from an IPO prospectus --------------------------------
+
+MANAGEMENT_TABLE = NL.join(
+    [
+        "MANAGEMENT",
+        "",
+        "Below is certain information regarding individuals expected to serve as our officers.",
+        "",
+        "| | | | |",
+        "|",
+        "",
+        "Name",
+        "",
+        "| |",
+        "",
+        "Age",
+        "",
+        "| Elon Musk | 54 |",
+        "",
+        "Chief Executive Officer, Chief Technical Officer and Chairman of the Board",
+        "",
+        "|",
+        "| Gwynne Shotwell | 62 |",
+        "",
+        "President, Chief Operating Officer and Director",
+        "",
+        "|",
+        "| Bret Johnsen | 57 |",
+        "",
+        "Chief Financial Officer",
+        "",
+        "|",
+        "| Antonio J. Gracias | 55 |",
+        "",
+        "Director",
+        "",
+        "Executive Officers and Management Directors",
+    ]
+)
+
+
+def test_prospectus_officer_rows_with_the_title_on_the_next_line_are_read():
+    rows = tt.exec_officer_rows(MANAGEMENT_TABLE)
+    assert [r["name"] for r in rows] == [
+        "Elon Musk",
+        "Gwynne Shotwell",
+        "Bret Johnsen",
+        "Antonio J. Gracias",
+    ]
+    assert rows[2]["title"] == "Chief Financial Officer" and rows[0]["age"] == "54"
+    found = tt.exec_officer_section(MANAGEMENT_TABLE)  # the list sits before any sub-heading
+    assert found is not None and "Bret Johnsen" in found[0]
+
+
+def test_a_dual_class_ownership_row_carries_its_combined_voting_power():
+    from primer.sections.exhibits_sec08 import GovernanceFacts, governance_exhibit, ownership_rows
+
+    text = NL.join(
+        [
+            "Class A common stock | Class B common stock | Combined voting power",
+            "| Elon Musk (1) | 849,494,440 | 12.3% | 5,569,053,075 | 93.6% | 85.1% | 849,494,440 | 11.3% | 5,569,053,075 | 93.6% | 84.4% |",
+            "| All directors and executive officers as a group (9 persons) | 1,000,000,000 | 14.0% | 5,569,053,075 | 93.6% | 85.5% | 1,000,000,000 | 13.0% | 5,569,053,075 | 93.6% | 85.0% |",
+        ]
+    )
+    holders = ownership_rows(text, "src_0001")
+    assert holders[0].holder == "Elon Musk" and holders[0].pct == 12.3
+    assert holders[0].voting_pct == 85.1
+    ex = governance_exhibit(
+        officers=[], holders=holders, facts=GovernanceFacts(source_id="src_0001"), filing_dates={}
+    )
+    assert (
+        "12.3% of Class A shares beneficially owned (849,494,440 shares) and 85.1% of combined voting power"
+        in ex.ownership_md
+    )
+    assert any(c.metric.startswith("voting_power_pct_") and c.value == 85.1 for c in ex.claims)
+    # a single-class table has no voting column: nothing is invented
+    single = "| BlackRock, Inc. | 16,900,000 | 7.3% | 16,900,000 | 7.3% |"
+    assert ownership_rows(single, "src_0002")[0].voting_pct is None
+
+
+def test_the_prospectus_ownership_section_has_its_own_chunk_and_proxy_words_follow_it():
+    from primer.evidence.chunking import chunk_by_item
+    from primer.sections.style import relabel_annual_document
+    from tests.test_no_10k import _para, _prospectus
+
+    doc = (
+        _prospectus()
+        + NL
+        + "SECURITY OWNERSHIP OF CERTAIN BENEFICIAL OWNERS AND MANAGEMENT"
+        + NL
+        + _para("owner", 90)
+        + NL
+        + "UNDERWRITING"
+        + NL
+        + _para("underwriting", 90)
+    )
+    assert "12" in {c.item for c in chunk_by_item(doc)}
+    out = relabel_annual_document(
+        "No table could be read from a proxy statement. Source: DEF 14A filed 2026-06-12. "
+        "A proxy fight is a different thing."
+    )
+    assert "an IPO prospectus" in out and "DEF 14A" not in out and "proxy fight" in out
+
+
+def test_a_targets_table_with_no_consensus_anywhere_drops_the_empty_columns():
+    from primer.sections.exhibits_sec06 import targets_table
+
+    ex = targets_table(
+        release=None, rel_sid=None, rel_date=None, mdna=[], k_sid=None, k_date=None,
+        remarks=["For Flight 15, which we expect next month, we will attempt to catch the booster."],
+        tr_sid="src_0007", tr_date=date(2026, 10, 21), consensus=None,
+    )  # fmt: skip
+    header = ex.markdown.splitlines()[0]
+    assert header == "| Metric | Management target | Date set |"
+    assert "Consensus" not in ex.markdown and "Gap" not in ex.markdown
+    assert any("no consensus or gap is computed" in n for n in ex.notes)

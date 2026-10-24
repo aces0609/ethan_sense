@@ -356,3 +356,25 @@ Cause and fix for each item the SPCX judge scored lowest. Result of the SPCX eva
 Known and not fixed: section 13 on the private path still pairs figures that share a fallback page
 date in one row (a $100 million seed round beside a $127 billion valuation); the private drafter can
 still write a "Conflict" note about a per-unit figure despite the new rule.
+
+## 2026-10-24: private rounds, per-employee notes, and the weak sections
+
+SpaceX public path after the fixes (live): gate passes, judge minimum 3.17 and mean 3.88, 9
+sections full (before: minimum 3.33, mean 3.82, 8 full). Section 12 rose from 3.33 to 4.0, section
+13 from 3.83 to 4.17, section 3 from 3.5 to 3.83. Section 10 fell from 4.33 to 3.83 on the judge's
+read of the same data (consensus revenue reads n/a in the table while the prose cites LSEG); the
+judge's other changes are within its run-to-run spread.
+
+| Item | Cause | Fix |
+|---|---|---|
+| Section 13 (private) paired a seed round with a valuation | Rows were keyed by source and date; a page that dates every undated figure by its own date merged different sentences and dropped the extra figures | Key by source, date and sentence: an amount and a valuation share a row only when one sentence states both |
+| "Conflict" note comparing profits per employee with net income | The drafting model wrote it; the rule in its prompt was not enough | `drop_unit_mismatch_conflicts` removes a Conflict note about a per-employee, per-user or per-subscriber figure (per-share EPS notes stay) |
+| Section 12 table: off-topic rows, Hold counted as bull, "upgrade to Strong Sell", 35 rows | News rows took any sentence with "upgraded"; neutral ratings fell through to the action word | Reject actions on another named company and firms like "Earth. The"; Neutral and Hold are neither case; a contradictory action label is reported as the source's label; cap at 8 per side with a note; markdown links stripped |
+| Section 8: two officers, no ownership, 12.3% for the controlling holder | Prospectus officer rows split their title onto the next line; the ownership section had no chunk; the first percentage in a dual-class row is Class A's | Rejoin split rows; chunk the ownership section as Item 12; read the prospectus as the proxy when none exists; add combined voting power (85.1%) and label the percentage "Class A shares"; proxy wording follows the prospectus |
+| Section 6 table: two columns of n/a | Every row was a sentence from the call, so no consensus could apply | Those columns are dropped for a table of call statements only; numeric guidance keeps them |
+
+Not fixed: section 10 has no segment margin table for SpaceX (the prospectus gives segment profit in
+separate per-segment tables, not one that sums to a total); section 7 lists one deal where the
+reference lists six (spectrum and smaller acquisitions are not in any 8-K the section reads); the
+KPI table's consensus revenue can read n/a while the prose cites a consensus; a consensus price
+target range can print high-to-low.

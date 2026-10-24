@@ -269,6 +269,17 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
     proxies = ctx.foundation_sources("DEF 14A")
     if proxies:
         out["proxy_sid"] = proxies[0]
+    elif ctx.foundation.get("annual_basis") and ctx.foundation_sources("10-K"):
+        # no proxy statement yet: the IPO prospectus carries what one would (management,
+        # compensation, ownership), so those sections stand in for it
+        parts = [t for t in (ctx.item_text(i)[0] for i in ("10", "11", "12")) if t]
+        if parts:
+            out["proxy_sid"] = ctx.foundation_sources("10-K")[0]
+            out["proxy_text"] = "\n\n".join(parts)
+            out["notes"].append(
+                "the company has not yet held a shareholder meeting, so management, compensation and "
+                "ownership are read from the IPO prospectus"
+            )
     # the officer list comes from a named 10-K section: Part I "Information about our
     # Executive Officers" or Item 10 (whichever heading is followed by officer rows), and
     # the proxy only as the fallback in `officer_rows`
@@ -311,7 +322,9 @@ def draft(
     if not proxy_sid and not tenk_sid:
         reason = res.get("error") or "neither a DEF 14A nor a 10-K is in the foundation pack"
         return unavailable_draft(brief, str(reason)[:200], ctx)
-    proxy_text = ctx.store.text(proxy_sid) if proxy_sid and ctx.store.has(proxy_sid) else ""
+    proxy_text = res.get("proxy_text") or (
+        ctx.store.text(proxy_sid) if proxy_sid and ctx.store.has(proxy_sid) else ""
+    )
     tenk_text = res.get("tenk_text") or ""
     officers, basis = officer_rows(tenk_text, tenk_sid, proxy_text, proxy_sid)
     if len(officers) < 3:

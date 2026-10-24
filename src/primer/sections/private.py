@@ -787,15 +787,22 @@ def press_table(dps: list[Datapoint], store: EvidenceStore) -> str:
 
 
 def rounds_table(dps: list[Datapoint], store: EvidenceStore) -> str:
-    """Section 13: one row per (source, date) with the amount raised and the valuation side
-    by side. No multiple is computed."""
-    groups: dict[tuple[str, str], list[Datapoint]] = {}
+    """Section 13: one row per (source, date, sentence) with the amount raised and the valuation
+    side by side. No multiple is computed.
+
+    The sentence is part of the key because a page that lists many rounds dates every figure
+    without a date of its own by the page date: a $100 million seed round and a $127 billion
+    valuation from different sentences must not share a row (SpaceX private run, 2026-10-23).
+    An amount and a valuation pair up only when one sentence states both."""
+    groups: dict[tuple[str, str, str], list[Datapoint]] = {}
     for d in dps:
         if d.kind not in ("funding", "valuation", "tender", "form_d"):
             continue
-        groups.setdefault((d.source_id, d.period), []).append(d)
+        groups.setdefault((d.source_id, d.period, " ".join(d.quote.split())), []).append(d)
     rows = []
-    for (sid, period), items in sorted(groups.items(), key=lambda kv: _neg(kv[0][1]))[:MAX_ROWS]:
+    for (sid, period, _sentence), items in sorted(groups.items(), key=lambda kv: _neg(kv[0][1]))[
+        :MAX_ROWS
+    ]:
         if not store.has(sid):
             continue
         amount = next((d for d in items if d.kind in ("funding", "tender")), None)

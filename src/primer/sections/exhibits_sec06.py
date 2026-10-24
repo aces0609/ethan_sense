@@ -395,9 +395,19 @@ def targets_table(
             notes + ["no dated management target found"],
             release.fy if release else None,
         )
-    md = md_table(
-        ["Metric", "Management target", "Date set", "Consensus (current FY)", "Gap (derived)"],
-        rows,
-        align_right_from=5,
-    )
+    if all(r[0] == "Prepared remarks (earnings call)" for r in rows):
+        # every target is a sentence from the call, never a number a consensus could be set
+        # against: two columns of n/a say nothing, so the table keeps the target and its date
+        md = md_table(
+            ["Metric", "Management target", "Date set"],
+            [r[:3] for r in rows],
+            align_right_from=5,
+        )
+        notes.append("the targets are statements from the call, so no consensus or gap is computed")
+    else:
+        md = md_table(
+            ["Metric", "Management target", "Date set", "Consensus (current FY)", "Gap (derived)"],
+            rows,
+            align_right_from=5,
+        )
     return TargetsExhibit(md, claims, True, dated, notes, release.fy if release else None)

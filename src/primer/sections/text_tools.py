@@ -418,8 +418,39 @@ def exec_officer_section(text: str, window: int = 15000) -> tuple[str, str] | No
         if n and (best is None or n > best[0]):
             best = (n, chunk, m.group(0))
     if best is None:
+        # an IPO prospectus puts the list under its "Management" title, before any "Executive
+        # Officers" sub-heading: read the start of the text
+        head = text[:window]
+        if len(exec_officer_rows(head)) >= 3:
+            return head, "Management"
         return None
     return best[1], best[2]
+
+
+SPLIT_OFFICER_ROW = re.compile(r"^\|\s*(" + NAME + r")\s*\|\s*(\d{2})\s*\|\s*$")
+
+
+def _join_split_officer_rows(text: str) -> list[str]:
+    """Lines of the text, with a prospectus officer row put back together: the table cell
+    "| Elon Musk | 54 |" is followed by its title on the next line, so the row looks like it
+    has no title."""
+    lines = text.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = SPLIT_OFFICER_ROW.match(lines[i].strip())
+        if m:
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            nxt = lines[j].strip() if j < len(lines) else ""
+            if nxt and not nxt.startswith("|"):
+                out.append(f"| {m.group(1)} | {m.group(2)} | {nxt} |")
+                i = j + 1
+                continue
+        out.append(lines[i])
+        i += 1
+    return out
 
 
 def exec_officer_rows(text: str) -> list[dict[str, str]]:
@@ -429,7 +460,7 @@ def exec_officer_rows(text: str) -> list[dict[str, str]]:
     about our Executive Officers', Item 10, or the proxy)."""
     out = []
     seen = set()
-    for raw in text.splitlines():
+    for raw in _join_split_officer_rows(text):
         line = raw.strip()
         m = OFFICER_LINE.match(line)
         if m and 28 <= int(m.group(2)) <= 85:
