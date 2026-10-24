@@ -259,6 +259,10 @@ def draft(
         + "\n\n**Analyst questions and what management said (as asked and answered on the calls)**\n\n"
         + ex.questions_md
     )
+    if not ex.present:
+        # no bull or bear point, no question: a table of "no sourced item" says nothing
+        exhibit_md = ""
+        notes.append("no sourced bull or bear point and no analyst question for the table")
     return finalize_draft(
         brief,
         ctx,
@@ -269,5 +273,5 @@ def draft(
         claims=ex.claims,
         coverage=coverage,
         notes=notes,
-        exhibit_title="Bull and bear points, with the open questions",
+        exhibit_title="Bull and bear points, with the open questions" if ex.present else None,
     )

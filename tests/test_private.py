@@ -115,7 +115,9 @@ def private_edgar(fixture_json):
                 return Response(state.efts_status, text="forbidden")
             return Response(200, json=state.hits)
 
-        router.get(url__regex=r"https://efts\.sec\.gov/LatestSearch/.*").mock(side_effect=efts)
+        router.get(url__regex=r"https://efts\.sec\.gov/LATEST/search-index.*").mock(
+            side_effect=efts
+        )
         router.get(
             "https://www.sec.gov/Archives/edgar/data/1234567/000123456726000042/primary_doc.xml"
         ).mock(return_value=Response(200, text=FORM_D_XML))

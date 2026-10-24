@@ -87,11 +87,13 @@ def build_context(state: ResearcherState, section: int) -> ToolContext:
     foundation = state.get("foundation", {}) or {}
     offline = bool(foundation.get("offline"))
     entity = Entity.model_validate(state["entity"])
-    budget = SectionBudget.for_section(section)
+    budget = SectionBudget.for_section(section, entity.private)
     if state.get("budget"):
         b = state["budget"]
         budget.used_searches = int(b.get("used_searches", 0))
         budget.used_scrapes = int(b.get("used_scrapes", 0))
+        budget.failed_scrapes = int(b.get("failed_scrapes", 0))
+        budget.failed_sites = dict(b.get("failed_sites") or {})
         budget.exhausted = b.get("exhausted")
         budget.notes = list(b.get("notes") or [])
     edgar = EdgarClient(runlog=runlog, offline=offline)
@@ -203,6 +205,8 @@ def _budget_state(ctx: ToolContext) -> dict[str, Any]:
     return {
         "used_searches": ctx.budget.used_searches,
         "used_scrapes": ctx.budget.used_scrapes,
+        "failed_scrapes": ctx.budget.failed_scrapes,
+        "failed_sites": dict(ctx.budget.failed_sites),
         "exhausted": ctx.budget.exhausted,
         "notes": list(dict.fromkeys(ctx.budget.notes)),
     }

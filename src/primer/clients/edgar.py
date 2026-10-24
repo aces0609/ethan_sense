@@ -51,7 +51,7 @@ COMPANYFACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 COMPANYCONCEPT_URL = (
     "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/{taxonomy}/{concept}.json"
 )
-FULLTEXT_URL = "https://efts.sec.gov/LatestSearch/"
+FULLTEXT_URL = "https://efts.sec.gov/LATEST/search-index"
 ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik_int}/{accn_nodash}/"
 
 

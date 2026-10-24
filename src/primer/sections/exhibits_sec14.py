@@ -123,6 +123,9 @@ def eightk_event(text: str, items: str | None) -> tuple[str, str]:
 
 
 def first_body_sentence(md: str, skip_title: bool = True) -> str:
+    # links and escapes out first: a byline "By [Name](url) \| 30 September 2026 Already have a
+    # subscription? [Log in](url)" is chrome, not the event
+    md = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", md).replace("\\|", "|")
     lines = [ln.strip() for ln in md.splitlines() if ln.strip()]
     if skip_title and lines and lines[0].startswith("#"):
         lines = lines[1:]
@@ -137,9 +140,15 @@ def first_body_sentence(md: str, skip_title: bool = True) -> str:
         if caps > len(words) / 3:
             continue  # "CREATE FREE ACCOUNT Menu Key Points" style clutter
         if re.search(
-            r"\b(sign in|subscribe|create free account|menu|key points|skip to)\b", ln, re.I
+            r"\b(sign in|log in|subscribe|subscription|create free account|menu|key points|skip to|"
+            r"official website|here's how you know|cookies?|newsletter|advertisement|share this|"
+            r"read more|already have an?)\b",
+            ln,
+            re.I,
         ):
             continue
+        if re.match(r"^By\s+.{2,60}?\s*\|", ln):
+            continue  # a byline line
         keep.append(ln)
     body = " ".join(keep)
     for s in sentences(body):

@@ -193,7 +193,8 @@ def check_attribution(sections_md: dict[int, str], store: EvidenceStore) -> dict
             m = ATTRIBUTION.search(sentence)
             if not m or m.group(1).split()[0] in NOT_FIRMS:
                 continue
-            firm = m.group(1)
+            # "Forge's estimated $123.86 billion": the firm is Forge, and a source names it "Forge"
+            firm = re.sub(r"['’]s$", "", m.group(1))
             if firm.split()[-1] in NOT_FIRMS and len(firm.split()) == 1:
                 continue
             if _is_company_person(firm, sections_md):

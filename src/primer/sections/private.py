@@ -279,6 +279,18 @@ PROCEEDS = re.compile(
 )
 
 
+# A government contract or award is not a funding round or a valuation, however large (Anduril:
+# a $20 billion Army enterprise contract ceiling and a $1.12 billion program value were tabled as a
+# valuation and a round).
+VALUATION_AFTER = re.compile(r"^\s*(?:post-money\s+|pre-money\s+)?valu(?:ation|ed)\b", re.I)
+
+CONTRACT_CONTEXT = re.compile(
+    r"contracts?|awarded|awards?|ceiling|IDIQ|task orders?|delivery orders?|program of record|"
+    r"enterprise agreement|procurement",
+    re.I,
+)
+
+
 def _near(
     rx: re.Pattern[str], sentence: str, start: int, end: int, before: int, after: int
 ) -> bool:
@@ -308,8 +320,14 @@ def classify_money(sentence: str, start: int, end: int) -> str | None:
         return None  # a per-employee, per-share or per-month figure is not a company total
     if _near(BUYBACK, sentence, start, end, 40, 40):
         return None  # a share buyback is neither a valuation nor a round
+    if kind in ("valuation", "funding", "tender") and _near(
+        CONTRACT_CONTEXT, sentence, start, end, 45, 30
+    ):
+        return None  # a contract value is not capital raised or a company valuation
     if _near(PROCEEDS, sentence, start, end, 30, 30):
         return "funding"  # IPO proceeds are capital raised, whatever else the sentence says
+    if kind == "funding" and VALUATION_AFTER.match(sentence[end : end + 30]):
+        return "valuation"  # "Series H at $61 Billion Valuation": the word after the amount decides
     if kind == "funding" and DEBT_AFTER.match(sentence[end : end + 30]):
         return "debt"
     return kind
@@ -912,6 +930,10 @@ def _filing_hit_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "filed": src.get("file_date"),
                 "form": form,
                 "names": " ".join(src.get("display_names") or []),
+                "name_list": [
+                    re.sub(r"\s*\(CIK[^)]*\)\s*$", "", n).strip()
+                    for n in (src.get("display_names") or [])
+                ],
                 "description": src.get("file_description") or "",
             }
         )
@@ -968,6 +990,21 @@ def _names_match(name: str, haystack: str) -> bool:
     return bool(n) and n in norm_company(haystack)
 
 
+def _issuer_key(name: str) -> str:
+    """A company name reduced to what identifies it: legal suffixes (Inc, LLC, LP) dropped."""
+    key = norm_company(name)
+    return re.sub(r"\b(llc|lp|l p|llp)$", "", key).strip()
+
+
+def _issuer_matches(ent: Entity, row: dict[str, Any]) -> bool:
+    """The Form D's issuer IS the company: its name equals the company's or an alias after
+    legal suffixes are dropped. Containing the name is not enough: investment vehicles are named
+    after the company they buy into ("Anduril Industries Feb 2025 a Series of CGF2021 LLC") and
+    their raise is not the company's."""
+    wanted = {_issuer_key(n) for n in (ent.name, *ent.aliases) if n}
+    return any(_issuer_key(n) in wanted for n in (row.get("name_list") or [row.get("names", "")]))
+
+
 def discover_form_d(
     edgar: EdgarClient,
     store: EvidenceStore,
@@ -997,7 +1034,7 @@ def discover_form_d(
         data = edgar.fulltext_search(
             query, forms=["D"], start=as_of - timedelta(days=365 * years), end=as_of
         )
-        rows = [r for r in _filing_hit_rows(data) if _names_match(ent.name, r["names"])]
+        rows = [r for r in _filing_hit_rows(data) if _issuer_matches(ent, r)]
         res["source"] = "edgar_fulltext"
     except Exception as e:  # noqa: BLE001 - 403 from this network is expected
         res["failures"] += 1

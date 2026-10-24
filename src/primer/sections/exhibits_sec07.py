@@ -201,6 +201,114 @@ def merger_deals(
     return out
 
 
+ACQ_VERBS = (
+    r"(?:(?:has|had|also|recently|subsequently)\s+)?"
+    r"(?:acquired|acquires|to acquire|will acquire|agreed to acquire|reached an agreement to acquire|"
+    r"completed (?:its |the )?acquisition of|announced (?:its |the )?acquisition of|buys|bought)"
+)
+ANNOUNCED_VERBS = re.compile(r"to acquire|will acquire|agreed|reached an agreement", re.I)
+MONTH_YEAR_RE = re.compile(rf"\b({MONTHS})\.?,?\s+(20\d{{2}})\b")
+NOT_TARGETS = {
+    "the",
+    "a",
+    "an",
+    "our",
+    "its",
+    "additional",
+    "several",
+    "two",
+    "three",
+    "more",
+    "a stake",
+}
+_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+
+
+def undisclosed_deals(
+    text: str,
+    source_id: str,
+    source_kind: str,
+    fallback_date: date | None,
+    acquirers: list[str],
+    limit: int = 8,
+) -> list[Deal]:
+    """Acquisitions the company made, from sentences that give no price.
+
+    Most acquisitions by a private company state no price, so the dollar-pattern extractor finds
+    none (Anduril's section named one deal). A sentence with the company as the subject and an
+    acquire verb gives a row with the value left undisclosed: "Anduril acquires Numerica's radar
+    business", "In March 2026, the company acquired ExoAnalytic Solutions". "The company" and "it"
+    count only when the page names the company in its first lines."""
+    flat = " ".join(_MD_LINK.sub(r"\1", text).split())
+    names = [n for n in dict.fromkeys(a.strip() for a in acquirers if a and a.strip())]
+    if not names:
+        return []
+    about = any(n.lower() in flat[:600].lower() for n in names)
+    subjects = [re.escape(n) for n in names] + (["the company", "it"] if about else [])
+    rx = re.compile(
+        rf"(?:{'|'.join(subjects)})\s+{ACQ_VERBS}\s+"
+        r"(?P<target>[A-Z0-9][\w&'\-]*(?:\.[\w&'\-]+)*(?:\s+[A-Z0-9][\w&'\-]*(?:\.[\w&'\-]+)*){0,3})"
+    )
+    me = {t for n in names for t in norm_company(n).split()}
+    out: list[Deal] = []
+    seen: set[str] = set()
+    for m in rx.finditer(flat):
+        target = _clean_target(re.sub(r"['’]s$", "", m.group("target")))
+        target = re.sub(r"^[A-Z][a-z]+['’]s\s+", "", target)  # "Ireland's Klas" -> "Klas"
+        target = re.sub(
+            r"^(?:\S+\s+)*\S+-based\s+", "", target
+        )  # "North Carolina-based Dive" -> "Dive"
+        key = norm_company(target)
+        if (
+            not target
+            or len(target) < 3
+            or key in seen
+            or key in GENERIC_TARGETS
+            or target.split()[0].lower() in NOT_TARGETS
+            or key.split()[0] in me
+            or target.lower().endswith("-based")  # "North Carolina-based": the company comes next
+        ):
+            continue
+        seen.add(key)
+        sentence, _start, nxt = _sentence_at(flat, m.start(), m.end())
+        # a date counts when it sits near the verb: long run-on text (a Wikipedia paragraph with
+        # footnotes) puts unrelated dates in the same "sentence"
+        lo = max(0, m.start() - _start - 160)
+        window = sentence[lo : m.end() - _start + 160]
+        fd = FULL_DATE_RE.search(window)
+        my = MONTH_YEAR_RE.search(window)
+        yr = YEAR_RE.search(window)
+        if fd and _iso_from_match(fd):
+            dt, basis = _iso_from_match(fd) or "n.d.", "sentence"
+        elif my and _MONTH_NUM.get(my.group(1)[:3].lower()):
+            dt, basis = f"{my.group(2)}-{_MONTH_NUM[my.group(1)[:3].lower()]:02d}", "sentence"
+        elif yr:
+            dt, basis = yr.group(1), "year"
+        elif fallback_date:
+            dt, basis = fallback_date.isoformat(), "page date"
+        else:
+            dt, basis = "n.d.", "none"
+        status = "announced" if ANNOUNCED_VERBS.search(m.group(0)) else "completed"
+        rat = RATIONALE_RE.search(sentence[m.end() - _start :]) or RATIONALE_RE.search(nxt)
+        out.append(
+            Deal(
+                target=target,
+                value_usd=0.0,
+                status=status,
+                date=dt,
+                date_basis=basis,
+                segment="n/a",
+                rationale=" ".join(rat.group(1).split())[:160] if rat else "n/a",
+                sentence=sentence[:400],
+                source_id=source_id,
+                source_kind=source_kind,
+            )
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
 def extract_deals(
     text: str, source_id: str, source_kind: str, fallback_date: date | None, limit: int = 12
 ) -> list[Deal]:
@@ -292,8 +400,16 @@ def extract_deals(
 def merge_deals(deals: list[Deal]) -> list[DealRow]:
     """Merge by normalised target; the first (filing) occurrence sets the descriptive cells."""
     rows: dict[str, DealRow] = {}
+    # "Dive" and "Dive Technologies" are one target: a name that is the start of a longer one joins it
+    keys = {norm_company(d.target) for d in deals}
+    longer = {
+        k: max((o for o in keys if o != k and o.split()[: len(k.split())] == k.split()), key=len)
+        for k in keys
+        if any(o != k and o.split()[: len(k.split())] == k.split() for o in keys)
+    }
     for d in deals:
         key = norm_company(d.target)
+        key = longer.get(key, key)
         r = rows.get(key)
         if r is None:
             r = DealRow(
@@ -307,6 +423,8 @@ def merge_deals(deals: list[Deal]) -> list[DealRow]:
             )
             rows[key] = r
         else:
+            if len(d.target) > len(r.target):
+                r.target = d.target  # the fuller name of the same company
             # a more specific date or a non-empty segment/rationale fills a gap
             if r.date_basis != "sentence" and d.date_basis == "sentence":
                 r.date, r.date_basis = d.date, d.date_basis

@@ -57,10 +57,15 @@ def concepts_config() -> dict[str, Any]:
     return load_yaml("concepts")
 
 
-def section_budget(section_id: int) -> dict[str, Any]:
+def section_budget(section_id: int, private: bool = False) -> dict[str, Any]:
+    """The section's caps. A private company has no filings to lean on, so its web-only sections
+    get the larger caps in `private_sections` (the Anduril run stopped sections 7 and 8 at five
+    scrapes each and named one acquisition)."""
     cfg = budgets_config()
     merged = dict(cfg.get("defaults", {}))
     merged.update(cfg.get("sections", {}).get(section_id, {}))
+    if private:
+        merged.update(cfg.get("private_sections", {}).get(section_id, {}))
     return merged
 
 

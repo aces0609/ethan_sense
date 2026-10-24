@@ -249,11 +249,17 @@ def draft(
         notes.append("web buckets (investor day coverage, trade press) not read")
     if ex.present and not deck_sid:
         notes.append("investor-day deck bucket not read")
-    caveat = common.caveat_line(
-        "targets are management's own statements as of the date shown for each row; consensus is a "
-        "single aggregator page (not a licensed feed) cited with its date, and the gap is derived from "
-        "the range midpoint"
-    )
+    if ex.present:
+        caveat = common.caveat_line(
+            "targets are management's own statements as of the date shown for each row; consensus is a "
+            "single aggregator page (not a licensed feed) cited with its date, and the gap is derived "
+            "from the range midpoint"
+        )
+    else:
+        caveat = common.caveat_line(
+            "targets are management's own statements as dated in the text; no dated numeric target "
+            "could be tied to a source, so there is no targets-versus-consensus table"
+        )
     return common.finalize_draft(
         brief,
         ctx,

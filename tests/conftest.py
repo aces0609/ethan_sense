@@ -304,7 +304,7 @@ def edgar_mock(fixture_json):
         router.get(url__regex=r"https://www\.sec\.gov/Archives/edgar/data/\d+/\d+/.*\.htm$").mock(
             return_value=Response(200, text=FAKE_10K_HTML)
         )
-        router.get(url__regex=r"https://efts\.sec\.gov/LatestSearch/.*").mock(
+        router.get(url__regex=r"https://efts\.sec\.gov/LATEST/search-index.*").mock(
             return_value=Response(
                 200,
                 json={

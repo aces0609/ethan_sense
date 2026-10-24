@@ -378,3 +378,22 @@ separate per-segment tables, not one that sums to a total); section 7 lists one 
 reference lists six (spectrum and smaller acquisitions are not in any 8-K the section reads); the
 KPI table's consensus revenue can read n/a while the prose cites a consensus; a consensus price
 target range can print high-to-low.
+
+## 2026-10-24: onboarding Anduril Industries (private)
+
+First private company onboarded through docs/ONBOARDING.md. Result (live, private path, model-backed):
+gate passes, judge minimum 3.33 and mean 3.93, 2 sections full (4 and one more) and 12 partial, none
+unavailable; offline replay identical with no missed lookups. Faults the first run exposed, all fixed with
+tests: an attribution check that failed on a possessive ("Forge's"); the EDGAR full-text URL (every
+full-text search in every run had been refused, which also hid Form D and section 7's 8-K search); Form D
+issuers matched by "contains", so an investment vehicle named after the company counted as the company's
+raise; no program table because programs were read from a 10-K (now the words award descriptions repeat);
+private sections capped too low (larger web caps in `private_sections`) and failed scrapes used the cap (now
+counted separately, with a stop after two failures on one site); acquisitions needed a dollar figure (now
+undisclosed-price rows); contract values, a "$61 billion Valuation" and other mislabelled figures in the
+press tables; scraped bylines and banners as event sentences; section 6 naming a table it did not have;
+an empty bull/bear table. Anduril is in config/eval.yaml (private: true).
+
+Not fixed: section 8 names one executive (the pages fetched name no others; anduril.com blocks scraping);
+the press tables still date some rows by the page date and can mislabel a figure when an aggregator lays
+amounts out in a table; section 13 repeats a funding round that two sources date a day apart.

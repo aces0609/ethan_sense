@@ -31,7 +31,13 @@ from primer.sections.common import (
     template_digest,
     unavailable_draft,
 )
-from primer.sections.exhibits_sec07 import Deal, acquisition_table, extract_deals, fmt_value
+from primer.sections.exhibits_sec07 import (
+    Deal,
+    acquisition_table,
+    extract_deals,
+    fmt_value,
+    undisclosed_deals,
+)
 from primer.sections.text_tools import paragraphs_with
 from primer.state import Brief, SectionDraft
 
@@ -289,7 +295,20 @@ def _deals_from_results(ctx: ToolContext, results: dict[str, Any]) -> list[Deal]
         if rec.access != "full":
             continue
         kind = "press" if any(k in rec.url for k in ("press", "news", "release")) else "news"
-        deals.extend(extract_deals(ctx.store.text(sid), sid, kind, rec.published_date, limit=6))
+        page_text = ctx.store.text(sid)
+        deals.extend(extract_deals(page_text, sid, kind, rec.published_date, limit=6))
+        if ctx.entity.private:
+            # most acquisitions by a private company state no price: keep them, value undisclosed
+            deals.extend(
+                undisclosed_deals(
+                    page_text,
+                    sid,
+                    kind,
+                    # an encyclopedia page carries no date of its own for the deals it lists
+                    None if "wikipedia.org" in (rec.url or "") else rec.published_date,
+                    [ctx.entity.name, ctx.co, *ctx.entity.aliases],
+                )
+            )
     agent = results.get("agent")
     if agent and ctx.store.has(agent["sid"]):
         for d in agent.get("deals", []):

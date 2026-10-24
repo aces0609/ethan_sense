@@ -181,3 +181,41 @@ violations. A replay of a run that used the model needs the recording that the r
   the full path and its financial sections can become full.
 - Re-run before using a primer: it reflects the sources on its `as_of` date.
 - Keys and credits expire. Check `primer info` and the Firecrawl balance first.
+
+## 12. Worked example: a private company (Anduril)
+
+Anduril Industries has no SEC registrant, so it takes the private path. This is what the
+onboarding looked like and what it turned up.
+
+```bash
+uv run primer run --company "Anduril Industries, Inc." --alias Anduril --private --yes
+```
+
+1. **Preflight.** `primer info`, the Firecrawl balance, and a name search of the SEC ticker file
+   (no match, so private is certain).
+2. **First run, then read it.** The gate failed on attribution, section 4 had no program table,
+   section 7 named one acquisition, and Form D discovery had failed. Each was a fault in the agent,
+   not a fact about the company.
+3. **What was wrong, and the fix:**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Gate failed on attribution | "Forge's estimated $123.86 billion": the source says "Forge", not "Forge's" | The possessive is stripped before the firm is checked |
+| "EDGAR full-text search failed" in every run | The client called a URL EDGAR refuses (`/LatestSearch/`); the working one is `/LATEST/search-index` | Fixed the URL; Form D and section 7's 8-K search now work |
+| A Form D from an investment vehicle read as Anduril's raise | The name match was "contains", and vehicles are named after the company ("Anduril Industries Feb 2025 a Series of CGF2021 LLC") | The Form D issuer must equal the company or an alias after legal suffixes |
+| Section 4 empty although 200 awards were found | Programs were derived from a 10-K, and a private company has none | Programs come from the words the award descriptions repeat (Roadrunner, CUXS, Lattice, Altius, Towers), minus contracting vocabulary; awards naming none stay unassigned |
+| Sections 7 and 8 stopped at five scrapes | Private sections rest on the web alone, and anduril.com failed on every scrape and each failure used the cap | Larger web caps for a private company; a failed scrape no longer uses the cap; a site that fails twice is skipped |
+| Section 7 listed one deal | Deals needed a dollar figure, and acquisitions by a private company rarely state one | A sentence with the company as buyer gives a row with the value undisclosed |
+| Contract values tabled as valuations and rounds | A $20 billion Army contract ceiling sat near the word "funding" | An amount near contract or award wording is not a round or a valuation |
+
+4. **What a private primer will not have.** Financial statements, a proxy, ownership or pay. Sections
+   9, 11 and 13 are press-reported and unaudited, marks diverge widely by source (Anduril: $61 billion
+   at Series H, about $90 billion in a tender, $111 billion on one aggregator), and the table shows the
+   range rather than choosing one.
+5. **Eval entry and replay.** The entry is in `config/eval.yaml` with `private: true` and honest
+   expectations (sections 9, 11 and 13 partial or unavailable). Replay of the run was identical with
+   no missed lookups.
+
+Expect a private run to need these checks on its first pass: the UEI set (is it the company's?), the
+program names (are they products?), the Form D issuer (the company, not a vehicle), and every
+valuation row (is the amount a valuation?).

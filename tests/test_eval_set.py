@@ -43,11 +43,14 @@ def _entry(**kw) -> es.EvalEntry:
 # ---- config ---------------------------------------------------------------------------------
 
 
-def test_eval_yaml_has_the_five_defense_entries():
+def test_eval_yaml_has_the_six_defense_entries():
     ev = es.load_eval_set()
     by = {e.id: e for e in ev.entries}
-    assert list(by) == ["LMT", "BA", "SPCX", "NOC", "LHX"]
-    assert [by[i].kind for i in by] == ["golden", "golden", "golden", "rubric", "rubric"]
+    assert list(by) == ["LMT", "BA", "SPCX", "anduril-industries-inc", "NOC", "LHX"]
+    assert [by[i].kind for i in by] == ["golden", "golden", "golden", "rubric", "rubric", "rubric"]
+    anduril = by["anduril-industries-inc"]
+    assert anduril.flags == {"private": True} and anduril.ticker is None
+    assert anduril.matches("anduril") and anduril.expect["is_public"] is False
     assert by["SPCX"].flags == {} and by["SPCX"].ticker == "SPCX"
     assert by["SPCX"].aliases == ["SpaceX"] and by["SPCX"].matches("spacex")
     assert by["SPCX"].golden == "docs/golden/spacex.md"

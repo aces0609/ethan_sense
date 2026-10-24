@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from primer.clients.edgar import EdgarClient
 from primer.clients.firecrawl import BudgetExhausted, FirecrawlClient, FirecrawlError
@@ -48,6 +49,15 @@ PDF_RE = re.compile(r"\.pdf($|\?)", re.I)
 # ---- budget --------------------------------------------------------------------------
 
 
+# A site that blocks scraping (anduril.com answers every request with a 500) returns no page and
+# no credit is spent on it, so a failure must not use up the section's scrape cap and starve the
+# pages that do load. A section still gives up after this many failures.
+MAX_FAILED_SCRAPES = 10
+# A site that fails twice is skipped for the rest of the section: anduril.com failed on every
+# page, and each further URL on it only spent the failure cap.
+MAX_FAILS_PER_SITE = 2
+
+
 @dataclass
 class SectionBudget:
     section: int
@@ -57,12 +67,14 @@ class SectionBudget:
     hits_per_search: int = 8
     used_searches: int = 0
     used_scrapes: int = 0
+    failed_scrapes: int = 0  # scrapes that returned nothing; they do not use the scrape cap
+    failed_sites: dict[str, int] = field(default_factory=dict)
     exhausted: str | None = None
     notes: list[str] = field(default_factory=list)
 
     @classmethod
-    def for_section(cls, section: int) -> SectionBudget:
-        b = section_budget(section)
+    def for_section(cls, section: int, private: bool = False) -> SectionBudget:
+        b = section_budget(section, private)
         return cls(
             section=section,
             searches=int(b.get("searches", 4)),
@@ -77,7 +89,23 @@ class SectionBudget:
             return False
         return True
 
+    @staticmethod
+    def _site(url: str) -> str:
+        host = (urlparse(url).hostname or url).lower()
+        return host[4:] if host.startswith("www.") else host
+
+    def note_failed_scrape(self, url: str) -> None:
+        self.failed_scrapes += 1
+        site = self._site(url)
+        self.failed_sites[site] = self.failed_sites.get(site, 0) + 1
+
+    def site_blocked(self, url: str) -> bool:
+        return self.failed_sites.get(self._site(url), 0) >= MAX_FAILS_PER_SITE
+
     def can_scrape(self) -> bool:
+        if self.failed_scrapes >= MAX_FAILED_SCRAPES:
+            self.exhausted = self.exhausted or f"{MAX_FAILED_SCRAPES} scrapes failed"
+            return False
         if self.used_scrapes >= self.scrapes:
             self.exhausted = self.exhausted or f"scrape cap {self.scrapes} reached"
             return False
@@ -87,6 +115,7 @@ class SectionBudget:
         return {
             "searches": f"{self.used_searches}/{self.searches}",
             "scrapes": f"{self.used_scrapes}/{self.scrapes}",
+            "failed_scrapes": self.failed_scrapes,
             "credits_cap": self.credits,
             "exhausted": self.exhausted,
         }
@@ -284,6 +313,8 @@ def web_research(
         if scraped >= limit or not ctx.budget.can_scrape():
             break
         url = row["url"]
+        if ctx.budget.site_blocked(url):
+            continue  # this site failed twice already
         try:
             if PDF_RE.search(url):
                 res = fc.parse(url, type=type, section_hint=hint)
@@ -298,7 +329,7 @@ def web_research(
             break
         except FirecrawlError as e:
             ctx.log(f"scrape failed for {url}: {e}")
-            ctx.budget.used_scrapes += 1
+            ctx.budget.note_failed_scrape(url)
             continue
     return rows
 
@@ -309,6 +340,8 @@ def scrape_url(
     """Scrape one known URL within budget; returns the source_id or None."""
     fc = ctx.firecrawl
     if fc is None or not fc.available or not ctx.budget.can_scrape():
+        return None
+    if ctx.budget.site_blocked(url):
         return None
     try:
         if PDF_RE.search(url):
@@ -321,7 +354,7 @@ def scrape_url(
         ctx.budget.exhausted = str(e)
     except FirecrawlError as e:
         ctx.log(f"scrape failed for {url}: {e}")
-        ctx.budget.used_scrapes += 1
+        ctx.budget.note_failed_scrape(url)
     return None
 
 

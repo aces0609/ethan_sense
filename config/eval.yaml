@@ -85,6 +85,28 @@ entries:
       section9: [full, partial]
       section4: [full, partial]
 
+  - name: Anduril Industries, Inc.
+    aliases: [Anduril]
+    ticker: null
+    kind: rubric
+    flags:
+      private: true
+    as_of: "2026-10-24"
+    sector: aerospace_defense
+    note: >-
+      A private defense company with a large federal business and no SEC registrant: the
+      private path on a company whose awards matter (USAspending, SAM.gov) and whose
+      acquisitions rarely state a price. Section 4 must group the awards into programs from the
+      award descriptions, section 7 must list acquisitions with the value undisclosed, and
+      sections 9, 11 and 13 must stay press-reported and unaudited. Funding-round and valuation
+      marks diverge widely by source and must be shown as a range, not reconciled.
+    expect:
+      is_public: false
+      section4: [full, partial]
+      section9: [partial, unavailable]
+      section11: [partial, unavailable]
+      section13: [partial, unavailable]
+
   - name: Northrop Grumman
     ticker: NOC
     kind: rubric

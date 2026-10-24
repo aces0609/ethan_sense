@@ -710,3 +710,209 @@ def test_a_targets_table_with_no_consensus_anywhere_drops_the_empty_columns():
     assert header == "| Metric | Management target | Date set |"
     assert "Consensus" not in ex.markdown and "Gap" not in ex.markdown
     assert any("no consensus or gap is computed" in n for n in ex.notes)
+
+
+# ---- Anduril (private) onboarding: faults the first run exposed -------------------------------
+
+
+def test_edgar_full_text_search_uses_the_endpoint_that_answers():
+    """The client called efts.sec.gov/LatestSearch/, which EDGAR refuses with a 403, so every
+    full-text search in every run failed (Form D discovery, section 7's 8-K search). The working
+    endpoint is /LATEST/search-index."""
+    from primer.clients import edgar
+
+    assert edgar.FULLTEXT_URL == "https://efts.sec.gov/LATEST/search-index"
+
+
+def test_a_form_d_from_an_investment_vehicle_is_not_the_companys_raise():
+    from primer.sections.private import _issuer_matches
+    from primer.state import Entity
+
+    ent = Entity(
+        name="Anduril Industries, Inc.", aliases=["Anduril", "Anduril Industries"], private=True
+    )
+    for vehicle in (
+        "Anduril Industries Feb 2025 a Series of CGF2021 LLC",
+        "MWSI VC Anduril Industries-I, LLC",
+    ):
+        assert not _issuer_matches(ent, {"name_list": [vehicle]})
+    assert _issuer_matches(ent, {"name_list": ["ANDURIL INDUSTRIES INC"]})
+    assert _issuer_matches(ent, {"name_list": ["Anduril Industries LLC"]})
+
+
+def test_attribution_checks_the_firm_without_its_possessive(tmp_path):
+    """ "Forge's estimated $123.86 billion" failed the gate: the source names Forge, not "Forge's"."""
+    from primer.evidence.store import EvidenceStore
+    from primer.validate.rules import check_attribution
+
+    store = EvidenceStore(tmp_path / "run", as_of=date(2026, 10, 24))
+    rec = store.register(
+        "Forge Price puts the company at $123.86 billion.", type="news", publisher="Forge",
+        title="t", url="https://forgeglobal.example.com/anduril", tier=2,
+    )  # fmt: skip
+    md = f"- Marks diverge, from the Series H to Forge's estimated $123.86 billion [{rec.source_id}]."
+    assert check_attribution({1: md}, store)["ok"]
+
+
+def test_a_private_company_gets_the_larger_web_caps_for_its_web_only_sections():
+    from primer.config import section_budget
+    from primer.sections.common import SectionBudget
+
+    assert section_budget(7)["scrapes"] == 5 and section_budget(7, True)["scrapes"] == 10
+    assert section_budget(8, True)["searches"] == 5
+    # a section with no private override is unchanged
+    assert section_budget(3, True) == section_budget(3)
+    pub, priv = SectionBudget.for_section(7), SectionBudget.for_section(7, private=True)
+    assert (pub.scrapes, priv.scrapes) == (5, 10)
+
+
+def test_a_private_companys_programs_come_from_the_words_its_awards_repeat():
+    """Anduril's USAspending awards name ROADRUNNER, CUXS, ALTIUS and the surveillance towers, but
+    program matching only read a 10-K, so 200 awards went unassigned and the table was empty."""
+    from primer.sections.sec04_programs import group_programs, private_program_keywords
+
+    descriptions = [
+        "EFS-ROADRUNNER HARDWARE",
+        "ROADRUNNER, ANVIL AND QUASAR PACKAGES",
+        "EFS-ROADRUNNER ANNUAL O&S",
+        "CUXS HARDWARE",
+        "SIP 115 - Q4 CUXS HARDWARE",
+        "ANNUAL OPERATIONS AND SUSTAINMENT FOR COUNTER UNMANNED SYSTEMS (CUXS) HARDWARE",
+        "PURCHASE OF TOWERS",
+        "SUSTAINMENT TOWERS UNDER DO16",
+        "DO 13-PURCHASE OF 51 TOWERS, FUNDING PROVIDED",
+        "DELIVERY ORDER FOR SUPPORT SERVICES",  # contracting words only: names no program
+        "DELIVERY ORDER FOR SUPPORT",
+        "DELIVERY ORDER FOR SUPPORT SERVICES",
+    ]
+    kw = private_program_keywords(descriptions, ["Anduril Industries, Inc.", "Anduril"])
+    assert set(kw) == {"Roadrunner", "CUXS", "Towers"}
+    awards = [{"Description": d, "Award Amount": 10.0 + i} for i, d in enumerate(descriptions)]
+    programs, unassigned = group_programs(awards, kw)
+    assert {p["program"] for p in programs} == {"Roadrunner", "CUXS", "Towers"}
+    assert len(unassigned) == 3  # the three that name nothing are reported, never guessed
+    # fewer than three awards is a coincidence, not a program
+    assert private_program_keywords(["ONE ZORBLAX", "TWO ZORBLAX"], ["X Corp"]) == {}
+
+
+def test_a_private_companys_acquisitions_without_a_price_become_deal_rows():
+    """Anduril's section 7 named one deal because the extractor needed a dollar figure, while its
+    own pages list eight acquisitions."""
+    from primer.sections.exhibits_sec07 import acquisition_table, undisclosed_deals
+
+    text = (
+        "Anduril Industries builds autonomous systems. Anduril acquires Numerica's radar and command "
+        "and control business to expand Lattice. In March 2026, the company acquired "
+        "[ExoAnalytic Solutions](https://example.com/exo), a space tracking firm. Anduril to acquire "
+        "Ireland's Klas in 2026. Anduril also acquired North Carolina-based Dive Technologies. "
+        "The company acquired the assets of a startup."
+    )
+    names = ["Anduril Industries, Inc.", "Anduril"]
+    deals = undisclosed_deals(text, "src_0001", "news", date(2026, 10, 1), names)
+    by = {d.target: d for d in deals}
+    assert set(by) == {"Numerica", "ExoAnalytic Solutions", "Klas", "Dive Technologies"}
+    assert (
+        by["ExoAnalytic Solutions"].date == "2026-03"
+        and by["ExoAnalytic Solutions"].status == "completed"
+    )
+    assert by["Klas"].status == "announced"
+    assert all(d.value_usd == 0.0 for d in deals)  # no price stated: none invented
+    ex = acquisition_table(deals)
+    assert len(ex.rows) == 4 and ex.claims == []
+    assert "| n/a [src_0001]" in ex.markdown.replace("n/a [src_0001] |", "| n/a [src_0001]")
+    # "the company" is the subject only when the page is about the company
+    other = "This page covers defense news. The company acquired Widget Works in 2025."
+    assert undisclosed_deals(other, "src_0002", "news", None, names) == []
+    # no acquirer names, no rows
+    assert undisclosed_deals(text, "src_0001", "news", None, []) == []
+
+
+def test_a_scrape_that_fails_does_not_use_up_the_scrape_cap():
+    """anduril.com answers every scrape with a 500; five failures used section 7's whole cap before
+    one page loaded."""
+    from primer.sections.common import MAX_FAILED_SCRAPES, SectionBudget
+
+    b = SectionBudget(section=7, searches=3, scrapes=5, credits=16)
+    for _ in range(MAX_FAILED_SCRAPES - 1):
+        b.failed_scrapes += 1
+    assert b.can_scrape() and b.used_scrapes == 0  # failures left the cap untouched
+    b.failed_scrapes += 1
+    assert not b.can_scrape() and "scrapes failed" in (b.exhausted or "")
+    ok = SectionBudget(section=7, searches=3, scrapes=2, credits=16)
+    ok.used_scrapes = 2
+    assert not ok.can_scrape() and "scrape cap 2" in (ok.exhausted or "")
+
+
+def test_a_short_target_name_joins_the_longer_name_of_the_same_deal():
+    from primer.sections.exhibits_sec07 import Deal, acquisition_table
+
+    def deal(target, sid):
+        return Deal(
+            target=target, value_usd=0.0, status="completed", date="2021-09", date_basis="sentence",
+            segment="n/a", rationale="n/a", sentence="s", source_id=sid, source_kind="news",
+        )  # fmt: skip
+
+    ex = acquisition_table([deal("Dive", "src_0058"), deal("Dive Technologies", "src_0011")])
+    assert [r.target for r in ex.rows] == ["Dive Technologies"]  # the fuller name
+    assert len(ex.rows) == 1 and set(ex.rows[0].source_ids) == {"src_0058", "src_0011"}
+
+
+def test_a_site_that_fails_twice_is_skipped_for_the_rest_of_the_section():
+    from primer.sections.common import SectionBudget
+
+    b = SectionBudget(section=14, searches=6, scrapes=12, credits=32)
+    url = "https://www.anduril.com/news/a"
+    b.note_failed_scrape(url)
+    assert not b.site_blocked("https://www.anduril.com/news/b")
+    b.note_failed_scrape("https://anduril.com/news/b")  # www and bare host are one site
+    assert b.site_blocked("https://www.anduril.com/news/c")
+    assert not b.site_blocked("https://www.example.com/x")
+    assert b.failed_scrapes == 2 and b.used_scrapes == 0
+
+
+def test_event_sentences_are_not_bylines_or_page_banners():
+    from primer.sections.exhibits_sec14 import first_body_sentence
+
+    page = (
+        "# Anduril requests flight approval for the CP-200\n\n"
+        r"By [Ryan Finnerty](https://example.com/a) \| 30 September 2026 Already have a subscription? "
+        "[Log in](https://example.com/login)\n\n"
+        "An official website of the United States government Here's how you know\n\n"
+        "Anduril has asked the FAA for approval to fly its new twin-boom CP-200 remotely piloted "
+        "aircraft from a test range in California next year."
+    )
+    s = first_body_sentence(page)
+    assert s.startswith("Anduril has asked the FAA")
+    assert "Log in" not in s and "official website" not in s.lower()
+
+
+def test_a_contract_value_is_not_a_valuation_or_a_funding_round():
+    from primer.sections.private import classify_money, money_tokens
+
+    def kinds(sentence):
+        return [classify_money(sentence, s, e) for _v, s, e in money_tokens(sentence)]
+
+    assert kinds("The Army awarded Anduril a $20 billion enterprise contract with a ceiling.") == [
+        None
+    ]
+    assert kinds("The program of record is valued at $1.12 billion.") == [None]
+    assert kinds(
+        "Anduril raised $2.5 billion in a Series G round at a $30.5 billion valuation."
+    ) == [
+        "funding",
+        "valuation",
+    ]
+
+
+def test_the_word_after_an_amount_decides_a_valuation_over_a_nearer_series_name():
+    """ "Anduril Raises $5 Billion Series H at $61 Billion Valuation" tabled $61 billion as a round."""
+    from primer.sections.private import classify_money, money_tokens
+
+    def kinds(sentence):
+        return [classify_money(sentence, s, e) for _v, s, e in money_tokens(sentence)]
+
+    assert kinds("Anduril Raises $5 Billion Series H at $61 Billion Valuation") == [
+        "funding",
+        "valuation",
+    ]
+    assert kinds("Anduril raised a $5 billion Series H round.") == ["funding"]

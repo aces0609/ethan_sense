@@ -55,6 +55,18 @@ sections:
   13: {pages: 1.5, searches: 3, scrapes: 5, credits: 16}   # private path: funding rounds and valuation
   14: {pages: 1.0, searches: 6, scrapes: 12, credits: 32}   # was 3 / 6 / 16
 
+# Larger caps for a private company, whose sections 7, 8, 10, 11 and 13 rest on the web alone
+# (the public caps above assume filings do the work). 2026-10-24, Anduril: sections 7 and 8 hit
+# "scrape cap 5 reached" and named one acquisition and one executive. Credits for a private run,
+# sections 2..14 = 12+40+40+40+40+32+26+14+20+20+40+24+32 = 380, + foundation 30 = 410 < 420
+# (no market-data pages for a private company).
+private_sections:
+  7:  {searches: 6, scrapes: 10, credits: 32}
+  8:  {searches: 5, scrapes: 8, credits: 26}
+  10: {searches: 4, scrapes: 6, credits: 20}
+  11: {searches: 4, scrapes: 6, credits: 20}
+  13: {searches: 4, scrapes: 8, credits: 24}
+
 # Numeric-consistency tolerance by metric family (fraction of the larger value).
 numeric_tolerance:
   default: 0.005

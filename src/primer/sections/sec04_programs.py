@@ -568,6 +568,64 @@ def _term_regex(term: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![A-Z0-9]){re.escape(term)}(?![A-Z0-9])")
 
 
+# Contracting and descriptive vocabulary that repeats across award descriptions without naming a
+# program. A private company has no 10-K to say which words are program names, so the words that
+# are not names are listed instead.
+CONTRACT_WORDS = {
+    "SUPPORT", "HARDWARE", "ORDER", "ORDERS", "DELIVERY", "SYSTEM", "SYSTEMS", "SERVICES",
+    "SERVICE", "INTEGRATION", "SUSTAINMENT", "COUNTER", "PHASE", "TASK", "WITH", "AWARD",
+    "PROCUREMENT", "UNMANNED", "SECURITY", "DEVELOPMENT", "AUTONOMOUS", "SURVEILLANCE",
+    "CONTRACTOR", "PURCHASE", "INSTALLATION", "OPERATIONS", "OPERATION", "THIS", "THAT", "FROM",
+    "UNDER", "EFFORT", "PROGRAM", "PROJECT", "CONTRACT", "OPTION", "YEAR", "FUNDING", "FUNDS",
+    "MODIFICATION", "SUPPLY", "SUPPLIES", "REPAIR", "MAINTENANCE", "SOFTWARE", "LICENSE",
+    "LICENSES", "LICENSING", "TRAINING", "ENGINEERING", "TECHNICAL", "RESEARCH", "REQUIREMENTS",
+    "QUANTITY", "PARTS", "EQUIPMENT", "MATERIAL", "MATERIALS", "ANNUAL", "SITE", "SITES", "NETWORK",
+    "INDEFINITE", "TRAVEL", "INTERIM", "AREA", "CAPITAL", "LEASE", "DISMOUNTED", "DELIVERABLE",
+    "DELIVERABLES", "PERIOD", "PERFORMANCE", "AUTHORIZATION", "FUNCTIONAL", "REQUEST", "COSTS",
+    "COST", "ANCILLARY", "FIXED", "WIDE", "ALONE", "PRICE", "PRICED", "CEILING", "MULTIPLE",
+    "EXISTING", "ADDITIONS", "RELATED", "REQUIREMENT", "MISSION", "COMMERCIAL", "SOLUTION",
+    "AMENDMENT", "INNOVATIVE", "BUSINESS", "SMALL", "SINGLE", "FIELDING", "PRODUCTION",
+    "FIRST", "SECOND", "THIRD", "BASE", "ADDITIONAL", "FOLLOW", "PROVIDE", "PROVIDES", "SHALL",
+    "INCLUDE", "INCLUDES", "REQUIRED", "REQUIRES", "UNITED", "STATES", "NATIONAL", "DEPARTMENT",
+    "ARMY", "NAVY", "FORCE", "MARINE", "CORPS", "SBIR", "STTR", "IDIQ", "CLIN", "CLINS", "FUND",
+    "CUSTOMER", "FACILITY", "FACILITIES", "TESTING", "TEST", "STUDY", "ANALYSIS", "DESIGN",
+    "BUILD", "PROTOTYPE", "PROTOTYPES", "DEMONSTRATION", "CAPABILITY", "CAPABILITIES", "UNIT",
+    "UNITS", "LINE", "LOT", "LOTS", "DATA", "SPARES", "SPARE", "KITS", "KIT", "FIELD", "DEPOT",
+}  # fmt: skip
+
+
+def private_program_keywords(
+    descriptions: list[str], company_names: list[str], min_awards: int = 3
+) -> dict[str, list[str]]:
+    """{program: [match terms]} for a company with no 10-K, from its own award descriptions.
+
+    A word that award descriptions repeat (at least `min_awards` awards) and that is not
+    contracting vocabulary is read as a program or product name: CUXS, ROADRUNNER, ALTIUS,
+    LATTICE for Anduril. An award whose description names none stays unassigned."""
+    me = {t.upper() for n in company_names for t in norm_company(n).split()}
+    counts: dict[str, set[int]] = {}
+    for i, d in enumerate(descriptions):
+        words = set(re.findall(r"(?<![A-Z0-9])[A-Z][A-Z0-9]{3,}(?![A-Z0-9])", (d or "").upper()))
+        for tok in words:
+            if (
+                tok in me
+                or tok in CONTRACT_WORDS
+                or tok in GENERIC_ACRONYMS
+                or tok.lower() in GENERIC_WORDS
+                or re.fullmatch(r"[A-Z]{1,2}[0-9]+|[0-9]+[A-Z]*|DO[0-9]+|FY[0-9]+|TO[0-9]+", tok)
+            ):
+                continue
+            counts.setdefault(tok, set()).add(i)
+    out: dict[str, list[str]] = {}
+    for tok, awards in sorted(counts.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        if len(awards) < min_awards:
+            continue
+        out[tok if len(tok) <= 5 else tok.title()] = [tok]  # CUXS stays upper case
+        if len(out) >= MAX_PROGRAMS * 2:
+            break
+    return out
+
+
 def learn_aliases(descriptions: list[str], keywords: dict[str, list[str]]) -> dict[str, list[str]]:
     """Acronyms the records define themselves: 'F-35 LIGHTNING II JOINT STRIKE FIGHTER (JSF)'
     teaches JSF -> F-35. Generic acquisition acronyms (LRIP, UCA) are never learned."""
@@ -828,6 +886,11 @@ def collect(plan_items: list[dict[str, Any]], ctx: ToolContext) -> dict[str, Any
     keywords = program_keywords(
         item1, ctx.entity.name, stop={ctx.entity.ticker or "", *ctx.entity.aliases}
     )
+    if not keywords and ctx.entity.private:
+        # no 10-K Item 1 to read program names from: the award descriptions name them
+        keywords = private_program_keywords(
+            [a.get("Description") or "" for a in awards], [ctx.entity.name, *ctx.entity.aliases]
+        )
     keywords = learn_aliases([a.get("Description") or "" for a in awards], keywords)
     programs, unassigned = group_programs(awards, keywords)
     res["keywords"] = keywords
