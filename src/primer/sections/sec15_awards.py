@@ -59,7 +59,8 @@ def _m(v: float | None) -> str:
     if v is None:
         return "n/a"
     x = v / 1e6
-    return f"{x:,.1f}" if abs(x) < 100 else f"{x:,.0f}"
+    text = f"{x:,.1f}" if abs(x) < 100 else f"{x:,.0f}"
+    return "0.0" if text == "-0.0" else text
 
 
 def _slug(label: str) -> str:
