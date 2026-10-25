@@ -281,11 +281,15 @@ class SamGovClient:
         self, ueis: list[str], start: date, end: date, polls: int, wait: float
     ) -> list[dict[str, Any]]:
         """The asynchronous JSON extract: a request with format=json answers with a download URL
-        and token; the file is fetched once it is ready. Cached whole, so a rerun costs nothing."""
+        and token; the file (a zip holding one JSON file) is fetched once it is ready. Cached
+        whole, so a rerun costs nothing. `emailId=No` is required next to `format` (the API
+        rejects one without the other) and keeps the link from being emailed."""
+        import io
         import time
+        import zipfile
 
         params = self._awards_params(ueis, start, end)
-        params.update({"format": "json", "includeSections": AWARD_SECTIONS})
+        params.update({"format": "json", "emailId": "No", "includeSections": AWARD_SECTIONS})
         key = f"extract:{AWARDS_URL}?{json.dumps(params, sort_keys=True)}"
 
         def fetch() -> dict[str, Any]:
@@ -295,8 +299,7 @@ class SamGovClient:
                 raise RuntimeError(f"SAM.gov extract gave no download link: {first}")
             url = url.replace("REPLACE_WITH_API_KEY", self.api_key)
             for i in range(polls):
-                if i:
-                    time.sleep(wait * i)
+                time.sleep(wait * (i + 1))  # the file takes a few seconds to generate
                 self.quota.take(1)
                 if self.runlog:
                     self.runlog.count("samgov_calls")
@@ -304,9 +307,13 @@ class SamGovClient:
                 if r.status_code == 429:
                     raise SamQuotaError("SAM.gov 429 while downloading the extract")
                 if r.status_code == 200:
+                    raw = r.content
                     try:
-                        body = r.json()
-                    except ValueError:
+                        if raw[:2] == b"PK":
+                            with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                                raw = z.read(z.namelist()[0])
+                        body = json.loads(raw)
+                    except (ValueError, zipfile.BadZipFile, IndexError, KeyError):
                         body = {}
                     if isinstance(body, dict) and "awardSummary" in body:
                         return {"awardSummary": body["awardSummary"]}

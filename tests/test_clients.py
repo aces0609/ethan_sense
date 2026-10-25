@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import io
+import json
+import zipfile
 from datetime import date
 
 import pytest
@@ -412,6 +415,8 @@ def test_samgov_awards_use_the_extract_when_the_pages_do_not_fit(store, tmp_path
 
     def search(request):
         if request.url.params.get("format") == "json":
+            # the live API rejects format without emailId, and No keeps the link from being emailed
+            assert request.url.params.get("emailId") == "No"
             return Response(
                 200,
                 json={
@@ -426,8 +431,15 @@ def test_samgov_awards_use_the_extract_when_the_pages_do_not_fit(store, tmp_path
         state["downloads"] += 1
         assert request.url.params["api_key"] == "k" and request.url.params["token"] == "tok123"
         if state["downloads"] == 1:
-            return Response(200, json={"message": "File is not ready"})
-        return Response(200, json={"awardSummary": _records(450)})
+            return Response(
+                400, json={"message": "The requested JSON or CSV file is not generated yet."}
+            )
+        buf = io.BytesIO()  # the live file is a zip holding one JSON file
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("awardResponse_tok123.json", json.dumps({"awardSummary": _records(450)}))
+        return Response(
+            200, content=buf.getvalue(), headers={"content-type": "application/octet-stream"}
+        )
 
     respx.get(AWARDS).mock(side_effect=search)
     respx.get(DOWNLOAD).mock(side_effect=download)

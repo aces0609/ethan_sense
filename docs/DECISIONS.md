@@ -417,5 +417,9 @@ which is taken. If a replacement was meant, the numbering is one edit in `state.
 - **Fallback.** USAspending (same FPDS data): obligations by sub-agency for each window plus the largest
   awards, whose amount is an amount to date and not split by window. Coverage is "partial" and the text
   says which source and why.
-- **Not verified live.** The SAM.gov paged and extract paths were built and tested against mocks and one
-  real record; the daily quota was spent before they ran live.
+- **Live findings (2026-10-25).** Pages work (limit 100, up to 100 UEIs joined by `~`; Anduril's three UEIs
+  hold 1,202 actions). The async extract needs `format=json` and `emailId=No` together (either alone is a
+  400; `Yes` would email the link), answers with `presignedUrl` and `exportToken`, and the download is a zip
+  holding one JSON file `{limit, offset, totalRecords, awardSummary}`; it was ready within 25 seconds. The
+  client now sends `emailId=No`, waits before each poll and unzips. The full section-15 render on SAM.gov
+  data is still to be seen: the day's 10 requests were spent on these probes.
