@@ -528,3 +528,37 @@ def test_samgov_hands_over_to_a_second_key_when_the_first_is_spent(store, tmp_pa
     for _ in range(10):
         sam._quotas[0].take(1) if sam._quotas[0].remaining() else None
     assert SamGovClient(store, daily_cap=10).api_key == "second"
+
+
+@respx.mock
+def test_usaspending_category_batches_never_ask_for_more_than_100_rows(
+    store, tmp_path, monkeypatch
+):
+    """Section 15's fallback for a contractor with many UEIs got a 422 from limit=120."""
+    import json as _json
+
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    limits: list[int] = []
+
+    def respond(request):
+        body = _json.loads(request.content)
+        limits.append(body["limit"])
+        if body["limit"] > 100:
+            return Response(422, json={"detail": "limit"})
+        return Response(
+            200,
+            json={
+                "results": [{"name": "Department of the Navy", "amount": 5.0}],
+                "page_metadata": {},
+            },
+        )
+
+    respx.post(
+        "https://api.usaspending.gov/api/v2/search/spending_by_category/awarding_subagency/"
+    ).mock(side_effect=respond)
+    us = USAspendingClient(store)
+    resp = us.obligations_by_category(
+        "awarding_subagency", [f"U{i}" for i in range(31)], date(2021, 10, 26), date(2026, 10, 26)
+    )
+    assert limits and max(limits) <= 100
+    assert resp["results"][0]["amount"] == 5.0 * 4  # four batches summed

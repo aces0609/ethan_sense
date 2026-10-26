@@ -315,7 +315,9 @@ class USAspendingClient:
             sub = {**body, "filters": {**body["filters"], "recipient_search_text": chunk}}
             # ask each batch for more rows than the final cut so a category that is small in
             # every batch but large in total is not lost
-            sub["limit"] = max(limit * 3, 30)
+            sub["limit"] = min(
+                max(limit * 3, 30), 100
+            )  # the endpoint answers a limit over 100 with a 422
             try:
                 r = self._post(f"/search/spending_by_category/{category}/", sub)
             except Exception as e:  # noqa: BLE001 - one batch failing must not lose the others

@@ -551,7 +551,16 @@ def self_consistency(run_dir: Path, tolerance: float = IDENTITY_TOLERANCE) -> di
         add("revenue_positive", "skipped", "no revenue claims")
 
     labels = sorted({int(fy[2:]) for m in by.values() for fy in m})
-    if len(labels) >= 2:
+    try:
+        private = bool(
+            json.loads((Path(run_dir) / "inputs.json").read_text("utf-8")).get("private")
+        )
+    except (OSError, ValueError):
+        private = False
+    if private:
+        # press reports a private company's figures for the years it chooses; a gap is not an error
+        add("fiscal_year_labels_consecutive", "skipped", "private company: press-reported years")
+    elif len(labels) >= 2:
         gaps = [
             {"after": f"FY{x}", "next": f"FY{y}"}
             for x, y in zip(labels, labels[1:], strict=False)

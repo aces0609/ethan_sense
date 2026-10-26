@@ -337,6 +337,15 @@ def test_self_consistency_catches_fcf_revenue_and_label_violations(tmp_path):
     assert r["checks"][3]["rows"] == [{"after": "FY2024", "next": "FY2027"}]
 
 
+def test_a_private_company_may_have_gaps_between_press_reported_years(tmp_path):
+    rows = [(m, "FY2027" if p == "FY2025" else p, v) for m, p, v in GOOD]
+    run = _claims(tmp_path, rows)
+    (run / "inputs.json").write_text('{"private": true}', encoding="utf-8")
+    r = self_consistency(run)
+    assert "fiscal_year_labels_consecutive" not in r["failed"]
+    assert r["checks"][3]["status"] == "skipped"
+
+
 def test_self_consistency_skips_what_it_cannot_check(tmp_path):
     r = self_consistency(_claims(tmp_path, [("revenue", "FY2025", 10.0)]))
     assert r["ok"] and r["ran"] == 1
