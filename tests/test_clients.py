@@ -502,3 +502,29 @@ def test_entity_lookups_leave_the_awards_pull_its_calls_on_a_small_quota(
     assert small.entity_call_budget(10) == 0  # never negative
     roomy = SamGovClient(store, api_key="k", daily_cap=1000)
     assert roomy.entity_call_budget(10) == 10  # a key with a role needs no reserve
+
+
+@respx.mock
+def test_samgov_hands_over_to_a_second_key_when_the_first_is_spent(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("PRIMER_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("SAM_GOV_API_KEY", "first")
+    monkeypatch.setenv("SAM_GOV_API_KEY_2", "second")
+    keys: list[str] = []
+
+    def search(request):
+        keys.append(request.url.params["api_key"])
+        if request.url.params["api_key"] == "first":
+            return Response(429, json={"code": "900804", "nextAccessTime": "2026-Oct-27"})
+        return Response(200, json={"totalRecords": "1", "awardSummary": _records(1)})
+
+    respx.get(AWARDS).mock(side_effect=search)
+    sam = SamGovClient(store, daily_cap=10)
+    out = sam.contract_awards(["U"], date(2025, 10, 26), date(2026, 10, 26))
+    assert keys == ["first", "second"] and len(out["awardSummary"]) == 1
+    # the second key now serves every call, and the pull counts both keys' remaining calls
+    sam.contract_awards(["V"], date(2025, 10, 26), date(2026, 10, 26))
+    assert keys == ["first", "second", "second"]
+    # a client started later the same day skips the key the local count shows spent
+    for _ in range(10):
+        sam._quotas[0].take(1) if sam._quotas[0].remaining() else None
+    assert SamGovClient(store, daily_cap=10).api_key == "second"

@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 
 from primer.clients.cache import DiskCache
-from primer.clients.ratelimit import DailyQuota
+from primer.clients.ratelimit import DailyQuota, QuotaExceeded
 from primer.config import output_root
 from primer.evidence.store import EvidenceStore
 from primer.runlog import RunLog
@@ -62,16 +62,62 @@ class SamGovClient:
     ) -> None:
         self.store = store
         self.runlog = runlog
-        self.api_key = api_key or os.environ.get("SAM_GOV_API_KEY", "")
+        keys = [api_key or os.environ.get("SAM_GOV_API_KEY", "")]
+        if not api_key and os.environ.get("SAM_GOV_API_KEY_2"):
+            keys.append(
+                os.environ["SAM_GOV_API_KEY_2"]
+            )  # a second key, used once the first is spent
         self.http = client or httpx.Client(timeout=120.0)
         root = output_root()
         self.cache = DiskCache(root, "samgov", ttl_seconds=7 * 24 * 3600, offline=offline)
         cap = daily_cap or int(os.environ.get("SAM_GOV_DAILY_CAP", str(DEFAULT_DAILY_CAP)))
-        self.quota = DailyQuota(root / ".samgov_quota.json", cap)
+        self._quotas = [
+            DailyQuota(
+                root / (".samgov_quota.json" if i == 0 else f".samgov_quota_{i + 1}.json"), cap
+            )
+            for i in range(len(keys))
+        ]
+        self._keys = keys
+        self._active = 0
+        # a key already spent today (by the local count) is skipped at the start
+        while self._active < len(keys) - 1 and not self._quotas[self._active].remaining():
+            self._active += 1
+
+    @property
+    def api_key(self) -> str:
+        return self._keys[self._active]
+
+    @property
+    def quota(self) -> DailyQuota:
+        return self._quotas[self._active]
 
     @property
     def available(self) -> bool:
         return bool(self.api_key)
+
+    def _next_key(self) -> bool:
+        """Move to the next key, when there is one."""
+        if self._active + 1 < len(self._keys):
+            self._active += 1
+            return True
+        return False
+
+    def _call(self, url: str, params: dict[str, Any]) -> httpx.Response:
+        """One counted request. A spent key (the local count, or a 429) hands over to the next
+        key; the last one raises SamQuotaError on a 429 and QuotaExceeded on the count."""
+        while True:
+            try:
+                self.quota.take(1)
+            except QuotaExceeded:
+                if self._next_key():
+                    continue
+                raise
+            if self.runlog:
+                self.runlog.count("samgov_calls")
+            r = self.http.get(url, params={**params, "api_key": self.api_key})
+            if r.status_code == 429 and self._next_key():
+                continue
+            return r
 
     def _get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
         key = f"{url}?{json.dumps(params, sort_keys=True)}"
@@ -79,10 +125,7 @@ class SamGovClient:
         def fetch() -> dict[str, Any]:
             if not self.api_key:
                 raise RuntimeError("SAM_GOV_API_KEY is not set")
-            self.quota.take(1)
-            if self.runlog:
-                self.runlog.count("samgov_calls")
-            r = self.http.get(url, params={**params, "api_key": self.api_key})
+            r = self._call(url, params)
             if r.status_code == 429:
                 try:
                     nxt = r.json().get("nextAccessTime")
@@ -232,7 +275,7 @@ class SamGovClient:
         return max(0, min(per_primer, self.quota.remaining() - AWARDS_RESERVE))
 
     def awards_remaining_calls(self) -> int:
-        return self.quota.remaining()
+        return sum(q.remaining() for q in self._quotas[self._active :])
 
     def pull_contract_awards(
         self,
@@ -324,10 +367,7 @@ class SamGovClient:
         return list(self.cache.get_or_fetch(key, fetch).get("awardSummary") or [])
 
     def _get_uncached(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
-        self.quota.take(1)
-        if self.runlog:
-            self.runlog.count("samgov_calls")
-        r = self.http.get(url, params={**params, "api_key": self.api_key})
+        r = self._call(url, params)
         if r.status_code == 429:
             raise SamQuotaError("SAM.gov 429: daily quota exhausted on the server side")
         r.raise_for_status()

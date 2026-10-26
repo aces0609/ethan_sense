@@ -30,7 +30,7 @@ A company that has just listed changes path on its first 10-K. Re-run it then.
    says `(llm)` after the first run.
 3. **Firecrawl credits.** A run uses roughly 15 to 35 credits when its pages are cached and up to
    150 when they are not. Check the balance before a batch.
-4. **SAM.gov quota.** Section 15 reads SAM.gov's Contract Awards API. A personal key with no SAM.gov role gets 10 requests a day; a key whose owner has a role, or a system account, gets 1,000. Set `SAM_GOV_DAILY_CAP` to what your key has. When the quota cannot cover the pull the section uses USAspending and says so.
+4. **SAM.gov quota.** Section 15 reads SAM.gov's Contract Awards API. A personal key with no SAM.gov role gets 10 requests a day; a key whose owner has a role, or a system account, gets 1,000. Set `SAM_GOV_DAILY_CAP` to what your key has. A second key in `SAM_GOV_API_KEY_2` is used once the first is spent (each key keeps its own daily count). When the quota cannot cover the pull the section uses USAspending and says so.
 5. **Sector.** The company's SIC code picks its sector tag from `config/sources.yaml`. Defense
    codes are covered. For another sector, add the SIC ranges, the trade-press domains, the
    section briefs and the peer fallbacks there. That is a config change, not code.
