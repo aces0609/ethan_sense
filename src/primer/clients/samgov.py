@@ -63,10 +63,11 @@ class SamGovClient:
         self.store = store
         self.runlog = runlog
         keys = [api_key or os.environ.get("SAM_GOV_API_KEY", "")]
-        if not api_key and os.environ.get("SAM_GOV_API_KEY_2"):
-            keys.append(
-                os.environ["SAM_GOV_API_KEY_2"]
-            )  # a second key, used once the first is spent
+        if not api_key:
+            n = 2  # SAM_GOV_API_KEY_2, _3, ...: each is used once the one before it is spent
+            while os.environ.get(f"SAM_GOV_API_KEY_{n}"):
+                keys.append(os.environ[f"SAM_GOV_API_KEY_{n}"])
+                n += 1
         self.http = client or httpx.Client(timeout=120.0)
         root = output_root()
         self.cache = DiskCache(root, "samgov", ttl_seconds=7 * 24 * 3600, offline=offline)
