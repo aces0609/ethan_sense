@@ -166,13 +166,10 @@ def parse_actions(summary: list[dict[str, Any]]) -> list[Action]:
                     _num(totals.get("totalBaseAndAllOptionsValue")),
                     _num(dollars.get("baseAndAllOptionsValue")),
                 ),
-                description=" ".join(
-                    str(
-                        (det.get("productOrServiceInformation") or {}).get(
-                            "descriptionOfContractRequirement"
-                        )
-                        or ""
-                    ).split()
+                description=_clean_text(
+                    (det.get("productOrServiceInformation") or {}).get(
+                        "descriptionOfContractRequirement"
+                    )
                 ),
                 kind=str(core.get("awardOrIDV") or "AWARD"),
                 completion=_date(dates.get("ultimateCompletionDate")),
@@ -315,6 +312,12 @@ NAME_SHORT = {
 }
 
 
+def _clean_text(v: Any) -> str:
+    """A description on one line: SAM.gov descriptions carry real newlines and the two characters
+    backslash-n typed as a line break."""
+    return " ".join(str(v or "").replace(chr(92) + "n", " ").split())
+
+
 def usaspending_label(name: str) -> str:
     """The same labels as `agency_label`, from a USAspending awarding sub-agency name."""
     n = (name or "").strip()
@@ -366,7 +369,7 @@ def from_usaspending(
             Contract(
                 agency=label,
                 piid=str(a.get("Award ID") or ""),
-                description=" ".join(str(a.get("Description") or "").split()),
+                description=_clean_text(a.get("Description")),
                 obligated={},
                 total_value=0.0,
                 first_signed=_date(a.get("Start Date")),

@@ -497,8 +497,11 @@ def draft(
         notes.insert(
             0, "SAM.gov could not supply the whole five-year window, so USAspending is the source"
         )
-    elif res.get("sam_method") == "extract":
-        notes.append("the actions came from SAM.gov's asynchronous extract")
+        notes.append(
+            "USAspending counts orders, definitive contracts and purchase orders; the "
+            "other-transaction agreements SAM.gov includes are not in these figures, so they can "
+            "run lower"
+        )
     coverage = "full" if (basis == "samgov" and not notes) else "partial"
     return common.finalize_draft(
         brief,

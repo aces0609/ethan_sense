@@ -176,3 +176,11 @@ def test_the_usaspending_adapter_builds_rows_and_contracts_without_inventing_win
     c = contracts["DoD – Navy"][0]
     assert c.amount_to_date == 5000.0 and c.obligated == {} and c.source_id == "src_0013"
     assert c.first_signed.isoformat() == "2022-01-01" and c.last_signed is None
+
+
+def test_descriptions_lose_typed_line_breaks():
+    from primer.sections.awards import _clean_text
+
+    assert _clean_text("ATTACHMENT 1: SOW" + chr(92) + "nATTACHMENT 2:  DELIVERY\n SCHEDULE") == (
+        "ATTACHMENT 1: SOW ATTACHMENT 2: DELIVERY SCHEDULE"
+    )
